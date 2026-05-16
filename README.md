@@ -60,6 +60,19 @@ dev board:
 Should adapt to other ESP32-S3 boards with an ST7789 by tweaking pins in
 `firmware/src/Display_ST7789.h`.
 
+## Display in action
+
+Real photos from the running firmware (the board is normally read with the
+USB connector to one side — 320×172 effective landscape):
+
+| Cost view | 7-day chart | Model breakdown |
+|:---:|:---:|:---:|
+| ![today and month cost](docs/screenshots/display-cost.jpg) | ![last 7 days bar chart](docs/screenshots/display-7days.jpg) | ![per-model cost](docs/screenshots/display-models.jpg) |
+| `OGGI $58.01` / `MESE $193.40` | `ULTIMI 7 GIORNI` with auto-scaled bars | `Opus 4.7` vs `Haiku 4.5` with proportional bars |
+
+Status bar at the top is always visible (`● ONLINE` + bridge endpoint), and
+the onboard RGB LED mirrors the connection state.
+
 ## Display layout
 
 The screen cycles through 4 views every 6 seconds. A persistent status bar
