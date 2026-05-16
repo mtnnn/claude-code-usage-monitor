@@ -73,46 +73,21 @@ USB connector to one side — 320×172 effective landscape):
 Status bar at the top is always visible (`● ONLINE` + bridge endpoint), and
 the onboard RGB LED mirrors the connection state.
 
-## Display layout
+The four views auto-rotate every 6 seconds:
 
-The screen cycles through 4 views every 6 seconds. A persistent status bar
-at the top shows ONLINE/OFFLINE state and the bridge endpoint.
+1. **Costo** — `OGGI $X` (large, green) and `MESE $Y`, with `updated Xs ago` footer.
+2. **Finestra 5h** *(the important one)* — current usage of the 5-hour rolling
+   rate-limit window as a single big percentage (green / orange / red at
+   70 % / 90 % thresholds), `$cost / $plan_limit`, `N msg | out tokens`, a
+   progress bar, and `reset tra Xh Ym` countdown.
+3. **Ultimi 7 giorni** — bar chart of daily cost over the past week,
+   auto-scaled, today is the rightmost bar.
+4. **Modelli (mese)** — top 5 models for the month with cost and a
+   proportional cyan bar.
 
-```
-┌─────────────────────────┐
-│ ● ONLINE  192.168.X.Y   │  status bar (always visible)
-├─────────────────────────┤
-│ View 1 / 4              │
-│                         │
-│         OGGI            │  TODAY: today's cost (large)
-│        $38.66           │
-│   ─────────────────     │
-│         MESE            │  MONTH: month-to-date cost
-│        $174.05          │
-│   updated 3s ago        │
-└─────────────────────────┘
-
-View 2: FINESTRA 5h               View 3: ULTIMI 7 GIORNI
-                                  max $135
-        25%                         │              ▆
-   del limite 5h                    │           ▂
-                                    │     ░     ▂
-    $46.88 / $200                   └─────────────
-   188 msg | out 197K                10 11 12 13 14 15 16
-   [████░░░░░░░░░░░░]
-    reset tra 1h 19m
-
-View 4: MODELLI (MESE)
-┌────────────────────────┐
-│ Opus 4.7      $173.32  │
-│ ████████████████████   │
-│ Haiku 4.5     $0.74    │
-│ ░                      │
-└────────────────────────┘
-```
-
-The RGB LED on the board mirrors the status: tenuous green = ONLINE,
-tenuous red = OFFLINE, brief purple flash on each successful fetch.
+The status bar at the top of every view shows `●` (green ONLINE / red
+OFFLINE), the bridge state, and your ESP32's LAN IP. The onboard RGB LED
+on GPIO 38 mirrors that state and flashes purple on each successful poll.
 
 ## Quick start
 
