@@ -3,6 +3,23 @@
 #include <stdio.h>
 #include <string.h>
 
+// ===== v0.2 palette =====
+// Una sola fonte di verità per i colori; il codice sotto usa solo questi macro.
+#define COL_BG           lv_color_hex(0x0b0d10)
+#define COL_BG_PANEL     lv_color_hex(0x14181d)
+#define COL_BG_STATUS    lv_color_hex(0x101820)
+#define COL_BG_CARD      lv_color_hex(0x1a1a1a)
+#define COL_FG           lv_color_hex(0xe6e6e6)
+#define COL_FG_DIM       lv_color_hex(0x8a8f96)
+#define COL_FG_MUTED     lv_color_hex(0x666666)
+#define COL_DIVIDER      lv_color_hex(0x444444)
+#define COL_BAR_BG       lv_color_hex(0x4c5159)
+#define COL_ACCENT_COST  lv_color_hex(0x35d399)   // verde — costo/money
+#define COL_ACCENT_TOK   lv_color_hex(0x38bdf8)   // ciano — token
+#define COL_WARN         lv_color_hex(0xfbbf24)   // ambra — 70%+ / ETA medio
+#define COL_DANGER       lv_color_hex(0xef4444)   // rosso — 90%+ / ETA <30
+#define COL_TIME         lv_color_hex(0xa78bfa)   // viola — barra tempo
+
 // ----- Font: usa quelli opzionali se abilitati in lv_conf.h, altrimenti fallback -----
 #if LV_FONT_MONTSERRAT_32
   #define FONT_HUGE   &lv_font_montserrat_32
@@ -43,16 +60,30 @@ static lv_obj_t* status_ip;
 
 static lv_obj_t* panels[4];
 
+// Splash (boot overlay)
+static lv_obj_t* splash_root = nullptr;
+static lv_obj_t* splash_state_lbl = nullptr;
+
+// Portal (setup mode overlay)
+static lv_obj_t* portal_root = nullptr;
+
 // Tab Costo
 static lv_obj_t* today_cost_lbl;
 static lv_obj_t* month_cost_lbl;
+static lv_obj_t* yesterday_lbl;
+static lv_obj_t* spark_chart;
+static lv_chart_series_t* spark_series;
 static lv_obj_t* updated_lbl;
 
 // Tab Finestra 5h
 static lv_obj_t* win_msg_lbl;
 static lv_obj_t* win_cost_lbl;
 static lv_obj_t* win_tokens_lbl;
-static lv_obj_t* win_elapsed_bar;
+static lv_obj_t* win_time_bar;       // barra Tempo (viola, 0..300 min)
+static lv_obj_t* win_time_val_lbl;
+static lv_obj_t* win_limit_bar;      // barra Limite (verde/ambra/rosso, 0..100%)
+static lv_obj_t* win_limit_val_lbl;
+static lv_obj_t* win_eta_lbl;        // popolata in M4 (ETA-to-limit)
 static lv_obj_t* win_reset_lbl;
 
 // Tab Grafico
@@ -69,7 +100,9 @@ static lv_obj_t* model_cost_lbl[MODEL_ROWS];
 static lv_obj_t* model_bar[MODEL_ROWS];
 static lv_obj_t* model_empty_lbl;
 
-static uint8_t active_panel = 0;
+static uint8_t  active_panel = 0;
+static bool     auto_rotate = true;
+static uint32_t rotate_paused_until = 0;
 
 // ----- Helper di formattazione -----
 static void fmt_money(char* dst, size_t cap, float v) {
@@ -120,7 +153,7 @@ static void make_status_bar(lv_obj_t* parent) {
   lv_obj_remove_style_all(bar);
   lv_obj_set_size(bar, SCREEN_W, STATUS_H);
   lv_obj_set_pos(bar, 0, 0);
-  lv_obj_set_style_bg_color(bar, lv_color_hex(0x101820), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(bar, COL_BG_STATUS, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -129,18 +162,18 @@ static void make_status_bar(lv_obj_t* parent) {
   lv_obj_set_size(status_dot, 8, 8);
   lv_obj_set_pos(status_dot, 5, 5);
   lv_obj_set_style_radius(status_dot, 4, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(status_dot, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(status_dot, COL_DANGER, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(status_dot, LV_OPA_COVER, LV_PART_MAIN);
 
   status_label = lv_label_create(bar);
-  lv_label_set_text(status_label, "...");
-  lv_obj_set_style_text_color(status_label, lv_color_hex(0xeeeeee), LV_PART_MAIN);
+  lv_label_set_text(status_label, LV_SYMBOL_WIFI " ...");
+  lv_obj_set_style_text_color(status_label, COL_FG, LV_PART_MAIN);
   lv_obj_set_style_text_font(status_label, FONT_TINY, LV_PART_MAIN);
   lv_obj_set_pos(status_label, 18, 2);
 
   status_ip = lv_label_create(bar);
   lv_label_set_text(status_ip, "");
-  lv_obj_set_style_text_color(status_ip, lv_color_hex(0x888888), LV_PART_MAIN);
+  lv_obj_set_style_text_color(status_ip, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(status_ip, FONT_TINY, LV_PART_MAIN);
   lv_obj_align(status_ip, LV_ALIGN_RIGHT_MID, -3, 0);
 }
@@ -161,106 +194,165 @@ static lv_obj_t* make_panel(lv_obj_t* parent, lv_color_t bg) {
 // Tab 0: COSTO
 static void build_cost_panel(lv_obj_t* p) {
   lv_obj_t* hdr = lv_label_create(p);
-  lv_label_set_text(hdr, "OGGI");
-  lv_obj_set_style_text_color(hdr, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
+  lv_label_set_text(hdr, "$ OGGI");
+  lv_obj_set_style_text_color(hdr, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(hdr, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 4);
 
   today_cost_lbl = lv_label_create(p);
   lv_label_set_text(today_cost_lbl, "$0.00");
-  lv_obj_set_style_text_color(today_cost_lbl, lv_color_hex(0x00ff88), LV_PART_MAIN);
+  lv_obj_set_style_text_color(today_cost_lbl, COL_ACCENT_COST, LV_PART_MAIN);
   lv_obj_set_style_text_font(today_cost_lbl, FONT_HUGE, LV_PART_MAIN);
   lv_obj_align(today_cost_lbl, LV_ALIGN_TOP_MID, 0, 26);
+
+  yesterday_lbl = lv_label_create(p);
+  lv_label_set_text(yesterday_lbl, "");
+  lv_obj_set_style_text_color(yesterday_lbl, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(yesterday_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(yesterday_lbl, LV_ALIGN_TOP_MID, 0, 72);
 
   lv_obj_t* sep = lv_obj_create(p);
   lv_obj_remove_style_all(sep);
   lv_obj_set_size(sep, 120, 1);
-  lv_obj_set_style_bg_color(sep, lv_color_hex(0x444444), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(sep, COL_DIVIDER, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_align(sep, LV_ALIGN_CENTER, 0, 0);
 
   lv_obj_t* mh = lv_label_create(p);
   lv_label_set_text(mh, "MESE");
-  lv_obj_set_style_text_color(mh, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
+  lv_obj_set_style_text_color(mh, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(mh, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(mh, LV_ALIGN_CENTER, 0, 20);
 
   month_cost_lbl = lv_label_create(p);
   lv_label_set_text(month_cost_lbl, "$0.00");
-  lv_obj_set_style_text_color(month_cost_lbl, lv_color_hex(0xffffff), LV_PART_MAIN);
+  lv_obj_set_style_text_color(month_cost_lbl, COL_FG, LV_PART_MAIN);
   lv_obj_set_style_text_font(month_cost_lbl, FONT_BIG, LV_PART_MAIN);
   lv_obj_align(month_cost_lbl, LV_ALIGN_CENTER, 0, 50);
 
+  // Sparkline 7 giorni in basso a destra (trend visivo)
+  spark_chart = lv_chart_create(p);
+  lv_obj_set_size(spark_chart, 64, 26);
+  lv_obj_align(spark_chart, LV_ALIGN_BOTTOM_RIGHT, -4, -22);
+  lv_chart_set_type(spark_chart, LV_CHART_TYPE_LINE);
+  lv_chart_set_point_count(spark_chart, 7);
+  lv_chart_set_div_line_count(spark_chart, 0, 0);
+  lv_obj_set_style_bg_opa(spark_chart, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(spark_chart, 0, LV_PART_MAIN);
+  lv_obj_set_style_size(spark_chart, 0, LV_PART_INDICATOR);     // no point markers
+  lv_obj_set_style_line_width(spark_chart, 2, LV_PART_ITEMS);
+  spark_series = lv_chart_add_series(spark_chart, COL_ACCENT_COST, LV_CHART_AXIS_PRIMARY_Y);
+
   updated_lbl = lv_label_create(p);
   lv_label_set_text(updated_lbl, "");
-  lv_obj_set_style_text_color(updated_lbl, lv_color_hex(0x666666), LV_PART_MAIN);
+  lv_obj_set_style_text_color(updated_lbl, COL_FG_MUTED, LV_PART_MAIN);
   lv_obj_set_style_text_font(updated_lbl, FONT_TINY, LV_PART_MAIN);
-  lv_obj_align(updated_lbl, LV_ALIGN_BOTTOM_MID, 0, -4);
+  lv_obj_align(updated_lbl, LV_ALIGN_BOTTOM_LEFT, 4, -4);
 }
 
 // Tab 1: FINESTRA 5h (Claude Code rate-limit window)
 static void build_window_panel(lv_obj_t* p) {
   lv_obj_t* hdr = lv_label_create(p);
-  lv_label_set_text(hdr, "FINESTRA 5h");
-  lv_obj_set_style_text_color(hdr, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
+  lv_label_set_text(hdr, LV_SYMBOL_REFRESH " FINESTRA 5h");
+  lv_obj_set_style_text_color(hdr, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(hdr, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 4);
 
-  // Numero messaggi grande, centrato
+  // % limite in grande
   win_msg_lbl = lv_label_create(p);
-  lv_label_set_text(win_msg_lbl, "0");
-  lv_obj_set_style_text_color(win_msg_lbl, lv_color_hex(0x00ccff), LV_PART_MAIN);
+  lv_label_set_text(win_msg_lbl, "0%");
+  lv_obj_set_style_text_color(win_msg_lbl, COL_ACCENT_TOK, LV_PART_MAIN);
   lv_obj_set_style_text_font(win_msg_lbl, FONT_HUGE, LV_PART_MAIN);
-  lv_obj_align(win_msg_lbl, LV_ALIGN_TOP_MID, 0, 24);
+  lv_obj_align(win_msg_lbl, LV_ALIGN_TOP_MID, 0, 22);
 
   lv_obj_t* mh = lv_label_create(p);
   lv_label_set_text(mh, "del limite 5h");
-  lv_obj_set_style_text_color(mh, lv_color_hex(0x888888), LV_PART_MAIN);
+  lv_obj_set_style_text_color(mh, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(mh, FONT_TINY, LV_PART_MAIN);
   lv_obj_align(mh, LV_ALIGN_TOP_MID, 0, 62);
 
   // Costo finestra
   win_cost_lbl = lv_label_create(p);
   lv_label_set_text(win_cost_lbl, "$0.00");
-  lv_obj_set_style_text_color(win_cost_lbl, lv_color_hex(0xffffff), LV_PART_MAIN);
+  lv_obj_set_style_text_color(win_cost_lbl, COL_FG, LV_PART_MAIN);
   lv_obj_set_style_text_font(win_cost_lbl, FONT_BIG, LV_PART_MAIN);
-  lv_obj_align(win_cost_lbl, LV_ALIGN_TOP_MID, 0, 84);
+  lv_obj_align(win_cost_lbl, LV_ALIGN_TOP_MID, 0, 80);
 
-  // Token in/out compatti
+  // Messaggi + token out compatti
   win_tokens_lbl = lv_label_create(p);
-  lv_label_set_text(win_tokens_lbl, "in 0  out 0");
-  lv_obj_set_style_text_color(win_tokens_lbl, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
-  lv_obj_set_style_text_font(win_tokens_lbl, FONT_SMALL, LV_PART_MAIN);
-  lv_obj_align(win_tokens_lbl, LV_ALIGN_TOP_MID, 0, 122);
+  lv_label_set_text(win_tokens_lbl, "");
+  lv_obj_set_style_text_color(win_tokens_lbl, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(win_tokens_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(win_tokens_lbl, LV_ALIGN_TOP_MID, 0, 112);
 
-  // Barra elapsed (tempo trascorso nella finestra)
-  win_elapsed_bar = lv_bar_create(p);
-  lv_obj_set_size(win_elapsed_bar, PANEL_W - 24, 16);
-  lv_obj_set_pos(win_elapsed_bar, 12, 162);
-  lv_bar_set_range(win_elapsed_bar, 0, 300);   // 300 minuti = 5h
-  lv_bar_set_value(win_elapsed_bar, 0, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(win_elapsed_bar, lv_color_hex(0x333333), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(win_elapsed_bar, lv_color_hex(0x00ff88), LV_PART_INDICATOR);
+  // --- Barra Tempo (viola, 0-300 min) ---
+  lv_obj_t* tempo_lbl = lv_label_create(p);
+  lv_label_set_text(tempo_lbl, "Tempo");
+  lv_obj_set_style_text_color(tempo_lbl, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(tempo_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(tempo_lbl, LV_ALIGN_TOP_LEFT, 6, 132);
+
+  win_time_val_lbl = lv_label_create(p);
+  lv_label_set_text(win_time_val_lbl, "0h 00m");
+  lv_obj_set_style_text_color(win_time_val_lbl, COL_FG, LV_PART_MAIN);
+  lv_obj_set_style_text_font(win_time_val_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(win_time_val_lbl, LV_ALIGN_TOP_RIGHT, -6, 132);
+
+  win_time_bar = lv_bar_create(p);
+  lv_obj_set_size(win_time_bar, PANEL_W - 24, 10);
+  lv_obj_set_pos(win_time_bar, 12, 148);
+  lv_bar_set_range(win_time_bar, 0, 300);
+  lv_bar_set_value(win_time_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(win_time_bar, COL_BAR_BG, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(win_time_bar, COL_TIME, LV_PART_INDICATOR);
+
+  // --- Barra Limite (verde→ambra→rosso, 0-100%) ---
+  lv_obj_t* lim_lbl = lv_label_create(p);
+  lv_label_set_text(lim_lbl, "Limite");
+  lv_obj_set_style_text_color(lim_lbl, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(lim_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(lim_lbl, LV_ALIGN_TOP_LEFT, 6, 168);
+
+  win_limit_val_lbl = lv_label_create(p);
+  lv_label_set_text(win_limit_val_lbl, "0%");
+  lv_obj_set_style_text_color(win_limit_val_lbl, COL_FG, LV_PART_MAIN);
+  lv_obj_set_style_text_font(win_limit_val_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(win_limit_val_lbl, LV_ALIGN_TOP_RIGHT, -6, 168);
+
+  win_limit_bar = lv_bar_create(p);
+  lv_obj_set_size(win_limit_bar, PANEL_W - 24, 10);
+  lv_obj_set_pos(win_limit_bar, 12, 184);
+  lv_bar_set_range(win_limit_bar, 0, 100);
+  lv_bar_set_value(win_limit_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(win_limit_bar, COL_BAR_BG, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(win_limit_bar, COL_ACCENT_COST, LV_PART_INDICATOR);
+
+  // ETA-to-limit (popolato in M4)
+  win_eta_lbl = lv_label_create(p);
+  lv_label_set_text(win_eta_lbl, "");
+  lv_obj_set_style_text_color(win_eta_lbl, COL_WARN, LV_PART_MAIN);
+  lv_obj_set_style_text_font(win_eta_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(win_eta_lbl, LV_ALIGN_BOTTOM_MID, 0, -20);
 
   // Countdown reset
   win_reset_lbl = lv_label_create(p);
   lv_label_set_text(win_reset_lbl, "nessuna finestra attiva");
-  lv_obj_set_style_text_color(win_reset_lbl, lv_color_hex(0xffffff), LV_PART_MAIN);
+  lv_obj_set_style_text_color(win_reset_lbl, COL_FG, LV_PART_MAIN);
   lv_obj_set_style_text_font(win_reset_lbl, FONT_SMALL, LV_PART_MAIN);
-  lv_obj_align(win_reset_lbl, LV_ALIGN_TOP_MID, 0, 190);
+  lv_obj_align(win_reset_lbl, LV_ALIGN_BOTTOM_MID, 0, -4);
 }
 
 // Tab 2: GRAFICO 7 GIORNI
 static void build_chart_panel(lv_obj_t* p) {
   lv_obj_t* hdr = lv_label_create(p);
-  lv_label_set_text(hdr, "ULTIMI 7 GIORNI");
-  lv_obj_set_style_text_color(hdr, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
+  lv_label_set_text(hdr, LV_SYMBOL_LIST " ULTIMI 7 GIORNI");
+  lv_obj_set_style_text_color(hdr, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(hdr, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 4);
 
   chart_max_lbl = lv_label_create(p);
   lv_label_set_text(chart_max_lbl, "max $0");
-  lv_obj_set_style_text_color(chart_max_lbl, lv_color_hex(0x888888), LV_PART_MAIN);
+  lv_obj_set_style_text_color(chart_max_lbl, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(chart_max_lbl, FONT_TINY, LV_PART_MAIN);
   lv_obj_align(chart_max_lbl, LV_ALIGN_TOP_RIGHT, -4, 22);
 
@@ -271,9 +363,9 @@ static void build_chart_panel(lv_obj_t* p) {
   lv_chart_set_point_count(chart, 7);
   lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
   lv_chart_set_div_line_count(chart, 4, 0);
-  lv_obj_set_style_bg_color(chart, lv_color_hex(0x111111), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(chart, COL_BG_PANEL, LV_PART_MAIN);
   lv_obj_set_style_border_width(chart, 0, LV_PART_MAIN);
-  chart_series = lv_chart_add_series(chart, lv_color_hex(0x00ff88), LV_CHART_AXIS_PRIMARY_Y);
+  chart_series = lv_chart_add_series(chart, COL_ACCENT_COST, LV_CHART_AXIS_PRIMARY_Y);
 
   // Labels giorno sotto le barre
   int chart_left = 8;
@@ -283,7 +375,7 @@ static void build_chart_panel(lv_obj_t* p) {
   for (int i = 0; i < 7; i++) {
     chart_day_lbls[i] = lv_label_create(p);
     lv_label_set_text(chart_day_lbls[i], "--");
-    lv_obj_set_style_text_color(chart_day_lbls[i], lv_color_hex(0xbbbbbb), LV_PART_MAIN);
+    lv_obj_set_style_text_color(chart_day_lbls[i], COL_FG_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_font(chart_day_lbls[i], FONT_TINY, LV_PART_MAIN);
     lv_obj_set_pos(chart_day_lbls[i], chart_left + slot_w * i + slot_w/2 - 8, chart_bottom + 2);
   }
@@ -292,8 +384,8 @@ static void build_chart_panel(lv_obj_t* p) {
 // Tab 3: MODELLI
 static void build_models_panel(lv_obj_t* p) {
   lv_obj_t* hdr = lv_label_create(p);
-  lv_label_set_text(hdr, "MODELLI (MESE)");
-  lv_obj_set_style_text_color(hdr, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
+  lv_label_set_text(hdr, LV_SYMBOL_OK " MODELLI (MESE)");
+  lv_obj_set_style_text_color(hdr, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(hdr, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 4);
 
@@ -304,7 +396,7 @@ static void build_models_panel(lv_obj_t* p) {
     lv_obj_remove_style_all(model_row[i]);
     lv_obj_set_size(model_row[i], PANEL_W - 12, row_h);
     lv_obj_set_pos(model_row[i], 6, top_y + i * (row_h + 4));
-    lv_obj_set_style_bg_color(model_row[i], lv_color_hex(0x1a1a1a), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(model_row[i], COL_BG_CARD, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(model_row[i], LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(model_row[i], 4, LV_PART_MAIN);
     lv_obj_clear_flag(model_row[i], LV_OBJ_FLAG_SCROLLABLE);
@@ -312,13 +404,13 @@ static void build_models_panel(lv_obj_t* p) {
 
     model_name_lbl[i] = lv_label_create(model_row[i]);
     lv_label_set_text(model_name_lbl[i], "");
-    lv_obj_set_style_text_color(model_name_lbl[i], lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_set_style_text_color(model_name_lbl[i], COL_FG, LV_PART_MAIN);
     lv_obj_set_style_text_font(model_name_lbl[i], FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_pos(model_name_lbl[i], 6, 4);
 
     model_cost_lbl[i] = lv_label_create(model_row[i]);
     lv_label_set_text(model_cost_lbl[i], "");
-    lv_obj_set_style_text_color(model_cost_lbl[i], lv_color_hex(0x00ff88), LV_PART_MAIN);
+    lv_obj_set_style_text_color(model_cost_lbl[i], COL_ACCENT_COST, LV_PART_MAIN);
     lv_obj_set_style_text_font(model_cost_lbl[i], FONT_SMALL, LV_PART_MAIN);
     lv_obj_align(model_cost_lbl[i], LV_ALIGN_TOP_RIGHT, -6, 4);
 
@@ -327,48 +419,252 @@ static void build_models_panel(lv_obj_t* p) {
     lv_obj_set_pos(model_bar[i], 6, 28);
     lv_bar_set_range(model_bar[i], 0, 100);
     lv_bar_set_value(model_bar[i], 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(model_bar[i], lv_color_hex(0x333333), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(model_bar[i], lv_color_hex(0x00ccff), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(model_bar[i], COL_BAR_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(model_bar[i], COL_ACCENT_TOK, LV_PART_INDICATOR);
   }
 
   model_empty_lbl = lv_label_create(p);
   lv_label_set_text(model_empty_lbl, "Nessun dato");
-  lv_obj_set_style_text_color(model_empty_lbl, lv_color_hex(0x666666), LV_PART_MAIN);
+  lv_obj_set_style_text_color(model_empty_lbl, COL_FG_MUTED, LV_PART_MAIN);
   lv_obj_set_style_text_font(model_empty_lbl, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(model_empty_lbl, LV_ALIGN_CENTER, 0, 0);
 }
 
-// Mostra solo il panel idx, nasconde gli altri
+// Helper one-shot per fade-out: nasconde il panel a fine animazione.
+// NB: NON chiamare lv_timer_del nel callback: lv_timer_set_repeat_count(tm, 1)
+// fa già auto-delete dopo la singola esecuzione. Doppio delete = UAF.
+static void hide_after_fade(lv_timer_t* t) {
+  lv_obj_t* obj = (lv_obj_t*)t->user_data;
+  if (obj) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Mostra solo il panel idx, nasconde gli altri con un fade discreto
 static void show_panel(uint8_t idx) {
-  active_panel = idx % 4;
-  for (uint8_t i = 0; i < 4; i++) {
-    if (i == active_panel) lv_obj_clear_flag(panels[i], LV_OBJ_FLAG_HIDDEN);
-    else                   lv_obj_add_flag(panels[i],   LV_OBJ_FLAG_HIDDEN);
-  }
+  uint8_t target = idx % 4;
+  if (target == active_panel) return;
+  uint8_t prev = active_panel;
+  active_panel = target;
+
+  lv_obj_clear_flag(panels[target], LV_OBJ_FLAG_HIDDEN);
+  lv_obj_fade_in(panels[target], 200, 0);
+
+  lv_obj_fade_out(panels[prev], 180, 0);
+  lv_timer_t* tm = lv_timer_create(hide_after_fade, 200, panels[prev]);
+  lv_timer_set_repeat_count(tm, 1);
 }
 
 static void rotate_timer_cb(lv_timer_t*) {
+  if (!auto_rotate) return;
+  if (rotate_paused_until && millis() < rotate_paused_until) return;
+  // Non ruotare mentre splash o portal sono visibili
+  if (splash_root || portal_root) return;
   show_panel(active_panel + 1);
+}
+
+void UsageUI_NextTab() {
+  show_panel(active_panel + 1);
+}
+
+void UsageUI_PauseRotate(uint32_t ms) {
+  rotate_paused_until = millis() + ms;
+}
+
+void UsageUI_SetAutoRotate(bool on) {
+  auto_rotate = on;
+}
+
+// One-shot: auto-delete del timer è gestito da lv_timer_set_repeat_count(tm, 1).
+static void toast_del_cb(lv_timer_t* t) {
+  lv_obj_t* obj = (lv_obj_t*)t->user_data;
+  if (obj) lv_obj_del(obj);
+}
+
+void UsageUI_Toast(const char* msg) {
+  if (!msg) return;
+  lv_obj_t* scr = lv_scr_act();
+  lv_obj_t* t = lv_obj_create(scr);
+  lv_obj_remove_style_all(t);
+  lv_obj_set_style_bg_color(t, COL_BG_CARD, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(t, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_radius(t, 6, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(t, 8, LV_PART_MAIN);
+  lv_obj_t* lbl = lv_label_create(t);
+  lv_label_set_text(lbl, msg);
+  lv_obj_set_style_text_color(lbl, COL_FG, LV_PART_MAIN);
+  lv_obj_set_style_text_font(lbl, FONT_SMALL, LV_PART_MAIN);
+  // Auto-size: aspettiamo il layout prima di centrare
+  lv_obj_update_layout(t);
+  lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -30);
+
+  lv_obj_fade_in(t, 150, 0);
+  lv_timer_t* tm = lv_timer_create(toast_del_cb, 1500, t);
+  lv_timer_set_repeat_count(tm, 1);
+}
+
+// --- API splash (overlay sopra l'UI principale) ---
+void UsageUI_Splash() {
+  if (splash_root) return;
+  lv_obj_t* scr = lv_scr_act();
+  splash_root = lv_obj_create(scr);
+  lv_obj_remove_style_all(splash_root);
+  lv_obj_set_size(splash_root, SCREEN_W, SCREEN_H);
+  lv_obj_set_pos(splash_root, 0, 0);
+  lv_obj_set_style_bg_color(splash_root, COL_BG, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(splash_root, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_clear_flag(splash_root, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t* logo = lv_label_create(splash_root);
+  lv_label_set_text(logo, "$");
+  lv_obj_set_style_text_color(logo, COL_ACCENT_COST, LV_PART_MAIN);
+  lv_obj_set_style_text_font(logo, FONT_HUGE, LV_PART_MAIN);
+  lv_obj_align(logo, LV_ALIGN_CENTER, 0, -60);
+
+  lv_obj_t* title = lv_label_create(splash_root);
+  lv_label_set_text(title, "Claude Code");
+  lv_obj_set_style_text_color(title, COL_FG, LV_PART_MAIN);
+  lv_obj_set_style_text_font(title, FONT_BIG, LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_CENTER, 0, -12);
+
+  lv_obj_t* sub = lv_label_create(splash_root);
+  lv_label_set_text(sub, "Usage Monitor");
+  lv_obj_set_style_text_color(sub, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(sub, FONT_SMALL, LV_PART_MAIN);
+  lv_obj_align(sub, LV_ALIGN_CENTER, 0, 12);
+
+  lv_obj_t* ver = lv_label_create(splash_root);
+  lv_label_set_text(ver, "v0.2.0");
+  lv_obj_set_style_text_color(ver, COL_FG_MUTED, LV_PART_MAIN);
+  lv_obj_set_style_text_font(ver, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(ver, LV_ALIGN_CENTER, 0, 38);
+
+  splash_state_lbl = lv_label_create(splash_root);
+  lv_label_set_text(splash_state_lbl, "");
+  lv_obj_set_style_text_color(splash_state_lbl, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(splash_state_lbl, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(splash_state_lbl, LV_ALIGN_BOTTOM_MID, 0, -20);
+}
+
+void UsageUI_SplashSetState(const char* line) {
+  if (splash_state_lbl && line) lv_label_set_text(splash_state_lbl, line);
+}
+
+// One-shot: auto-delete del timer è gestito da lv_timer_set_repeat_count(tm, 1).
+static void splash_del_cb(lv_timer_t* t) {
+  lv_obj_t* obj = (lv_obj_t*)t->user_data;
+  if (obj) lv_obj_del(obj);
+}
+
+void UsageUI_DismissSplash() {
+  if (!splash_root) return;
+  lv_obj_fade_out(splash_root, 400, 0);
+  lv_timer_t* tm = lv_timer_create(splash_del_cb, 450, splash_root);
+  lv_timer_set_repeat_count(tm, 1);
+  splash_root = nullptr;
+  splash_state_lbl = nullptr;
+}
+
+bool UsageUI_SplashVisible() {
+  return splash_root != nullptr;
+}
+
+// --- Captive portal panel ---
+void UsageUI_ShowPortal(const char* ap_name, const char* ap_ip) {
+  if (portal_root) {
+    lv_obj_del(portal_root);
+    portal_root = nullptr;
+  }
+  lv_obj_t* scr = lv_scr_act();
+  portal_root = lv_obj_create(scr);
+  lv_obj_remove_style_all(portal_root);
+  lv_obj_set_size(portal_root, SCREEN_W, SCREEN_H);
+  lv_obj_set_pos(portal_root, 0, 0);
+  lv_obj_set_style_bg_color(portal_root, COL_BG, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(portal_root, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_clear_flag(portal_root, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t* title = lv_label_create(portal_root);
+  lv_label_set_text(title, LV_SYMBOL_WIFI " Modalita");
+  lv_obj_set_style_text_color(title, COL_FG, LV_PART_MAIN);
+  lv_obj_set_style_text_font(title, FONT_BIG, LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+  lv_obj_t* title2 = lv_label_create(portal_root);
+  lv_label_set_text(title2, "Setup");
+  lv_obj_set_style_text_color(title2, COL_FG, LV_PART_MAIN);
+  lv_obj_set_style_text_font(title2, FONT_HUGE, LV_PART_MAIN);
+  lv_obj_align(title2, LV_ALIGN_TOP_MID, 0, 40);
+
+  lv_obj_t* sub1 = lv_label_create(portal_root);
+  lv_label_set_text(sub1, "Connettiti a:");
+  lv_obj_set_style_text_color(sub1, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(sub1, FONT_SMALL, LV_PART_MAIN);
+  lv_obj_align(sub1, LV_ALIGN_TOP_MID, 0, 110);
+
+  lv_obj_t* ap = lv_label_create(portal_root);
+  lv_label_set_text(ap, ap_name ? ap_name : "ClaudeMonitor");
+  lv_obj_set_style_text_color(ap, COL_ACCENT_TOK, LV_PART_MAIN);
+  lv_obj_set_style_text_font(ap, FONT_SMALL, LV_PART_MAIN);
+  lv_obj_set_style_text_align(ap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_label_set_long_mode(ap, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(ap, SCREEN_W - 12);
+  lv_obj_align(ap, LV_ALIGN_TOP_MID, 0, 130);
+
+  lv_obj_t* sub2 = lv_label_create(portal_root);
+  lv_label_set_text(sub2, "poi apri:");
+  lv_obj_set_style_text_color(sub2, COL_FG_DIM, LV_PART_MAIN);
+  lv_obj_set_style_text_font(sub2, FONT_SMALL, LV_PART_MAIN);
+  lv_obj_align(sub2, LV_ALIGN_TOP_MID, 0, 170);
+
+  lv_obj_t* url = lv_label_create(portal_root);
+  lv_label_set_text_fmt(url, "http://%s", ap_ip ? ap_ip : "192.168.4.1");
+  lv_obj_set_style_text_color(url, COL_ACCENT_COST, LV_PART_MAIN);
+  lv_obj_set_style_text_font(url, FONT_SMALL, LV_PART_MAIN);
+  lv_obj_align(url, LV_ALIGN_TOP_MID, 0, 188);
+
+  lv_obj_t* hint = lv_label_create(portal_root);
+  lv_label_set_text(hint, "BOOT >5s = reset");
+  lv_obj_set_style_text_color(hint, COL_FG_MUTED, LV_PART_MAIN);
+  lv_obj_set_style_text_font(hint, FONT_TINY, LV_PART_MAIN);
+  lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+
+  // Nascondi i 4 panel principali e la status bar resta visibile (status_bar
+  // sta a z-index inferiore comunque, ma il portal_root la copre)
+  for (uint8_t i = 0; i < 4; i++) {
+    if (panels[i]) lv_obj_add_flag(panels[i], LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UsageUI_HidePortal() {
+  if (!portal_root) return;
+  lv_obj_del(portal_root);
+  portal_root = nullptr;
+  // Ripristina pannello attivo
+  if (active_panel < 4 && panels[active_panel]) {
+    lv_obj_clear_flag(panels[active_panel], LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 void UsageUI_Init() {
   lv_obj_t* scr = lv_scr_act();
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scr, COL_BG, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
   make_status_bar(scr);
 
-  panels[0] = make_panel(scr, lv_color_hex(0x000000));
-  panels[1] = make_panel(scr, lv_color_hex(0x000000));
-  panels[2] = make_panel(scr, lv_color_hex(0x000000));
-  panels[3] = make_panel(scr, lv_color_hex(0x000000));
+  panels[0] = make_panel(scr, COL_BG);
+  panels[1] = make_panel(scr, COL_BG);
+  panels[2] = make_panel(scr, COL_BG);
+  panels[3] = make_panel(scr, COL_BG);
 
   build_cost_panel(panels[0]);
   build_window_panel(panels[1]);
   build_chart_panel(panels[2]);
   build_models_panel(panels[3]);
 
-  show_panel(0);
+  // primo panel visibile senza fade
+  active_panel = 0;
+  lv_obj_clear_flag(panels[0], LV_OBJ_FLAG_HIDDEN);
+  for (uint8_t i = 1; i < 4; i++) lv_obj_add_flag(panels[i], LV_OBJ_FLAG_HIDDEN);
   lv_timer_create(rotate_timer_cb, ROTATE_INTERVAL_MS, nullptr);
 }
 
@@ -379,11 +675,11 @@ void UsageUI_SetIp(const char* ip) {
 void UsageUI_Update(const UsageData& d) {
   // --- Status bar ---
   if (d.online) {
-    lv_obj_set_style_bg_color(status_dot, lv_palette_main(LV_PALETTE_GREEN), LV_PART_MAIN);
-    lv_label_set_text(status_label, "ONLINE");
+    lv_obj_set_style_bg_color(status_dot, COL_ACCENT_COST, LV_PART_MAIN);
+    lv_label_set_text(status_label, LV_SYMBOL_WIFI " ONLINE");
   } else {
-    lv_obj_set_style_bg_color(status_dot, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
-    lv_label_set_text(status_label, "OFFLINE");
+    lv_obj_set_style_bg_color(status_dot, COL_DANGER, LV_PART_MAIN);
+    lv_label_set_text(status_label, LV_SYMBOL_WIFI " OFFLINE");
   }
 
   // --- Costo ---
@@ -392,6 +688,28 @@ void UsageUI_Update(const UsageData& d) {
   lv_label_set_text(today_cost_lbl, buf);
   fmt_money(buf, sizeof(buf), d.month_cost_usd);
   lv_label_set_text(month_cost_lbl, buf);
+
+  // "ieri $X.YZ" da last7[5] (index 6 = oggi)
+  if (d.last7_cost[5] > 0.001f) {
+    char yb[16];
+    fmt_money(yb, sizeof(yb), d.last7_cost[5]);
+    lv_label_set_text_fmt(yesterday_lbl, "ieri %s", yb);
+  } else {
+    lv_label_set_text(yesterday_lbl, "");
+  }
+
+  // Sparkline 7 giorni
+  {
+    float spark_max = 0.01f;
+    for (int i = 0; i < 7; i++) if (d.last7_cost[i] > spark_max) spark_max = d.last7_cost[i];
+    int sm = (int)(spark_max + 1.0f);
+    lv_chart_set_range(spark_chart, LV_CHART_AXIS_PRIMARY_Y, 0, sm);
+    for (int i = 0; i < 7; i++) {
+      lv_chart_set_value_by_id(spark_chart, spark_series, i,
+                               (int)(d.last7_cost[i] + 0.5f));
+    }
+    lv_chart_refresh(spark_chart);
+  }
 
   if (d.last_update_ms > 0) {
     uint32_t age_s = (millis() - d.last_update_ms) / 1000;
@@ -403,16 +721,17 @@ void UsageUI_Update(const UsageData& d) {
 
   // --- Finestra 5h ---
   if (d.win_active) {
-    // % limite in grande (al posto del conteggio messaggi)
+    // % limite in grande
     uint16_t lp = d.win_limit_pct;
     if (lp > 999) lp = 999;
     lv_label_set_text_fmt(win_msg_lbl, "%u%%", (unsigned)lp);
 
-    // colore numero grande: verde / arancio / rosso
-    lv_color_t lpcol = lv_color_hex(0x00ff88);
-    if (lp >= 90)      lpcol = lv_palette_main(LV_PALETTE_RED);
-    else if (lp >= 70) lpcol = lv_palette_main(LV_PALETTE_ORANGE);
+    // colore numero grande + barra limite: verde / ambra / rosso
+    lv_color_t lpcol = COL_ACCENT_COST;
+    if (lp >= 90)      lpcol = COL_DANGER;
+    else if (lp >= 70) lpcol = COL_WARN;
     lv_obj_set_style_text_color(win_msg_lbl, lpcol, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(win_limit_bar, lpcol, LV_PART_INDICATOR);
 
     // costo + tetto piano
     if (d.win_limit_usd > 0.001f) {
@@ -424,16 +743,21 @@ void UsageUI_Update(const UsageData& d) {
     }
 
     // messaggi assistant + token compatti
-    char wi[16], wo[16];
-    fmt_tokens(wi, sizeof(wi), d.win_tokens_in);
+    char wo[16];
     fmt_tokens(wo, sizeof(wo), d.win_tokens_out);
-    lv_label_set_text_fmt(win_tokens_lbl, "%u msg | out %s",
+    lv_label_set_text_fmt(win_tokens_lbl, "%u msg  |  out %s",
                           (unsigned)d.win_messages, wo);
 
-    // barra = % limite (0-100, indicatore visivo dello stato)
-    int pct = (lp > 100) ? 100 : (int)lp;
-    lv_bar_set_value(win_elapsed_bar, pct, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(win_elapsed_bar, lpcol, LV_PART_INDICATOR);
+    // Barra Tempo (0..300 min)
+    uint16_t em = d.win_elapsed_min > 300 ? 300 : d.win_elapsed_min;
+    lv_bar_set_value(win_time_bar, em, LV_ANIM_OFF);
+    lv_label_set_text_fmt(win_time_val_lbl, "%uh %02um",
+                          (unsigned)(em / 60), (unsigned)(em % 60));
+
+    // Barra Limite (0..100%, capped)
+    int lim_pct_cap = (lp > 100) ? 100 : (int)lp;
+    lv_bar_set_value(win_limit_bar, lim_pct_cap, LV_ANIM_OFF);
+    lv_label_set_text_fmt(win_limit_val_lbl, "%u%%", (unsigned)lp);
 
     // Countdown reset
     uint16_t r = d.win_remaining_min;
@@ -445,12 +769,42 @@ void UsageUI_Update(const UsageData& d) {
       lv_label_set_text_fmt(win_reset_lbl, "reset tra %uh %02um",
                             (unsigned)(r / 60), (unsigned)(r % 60));
     }
+
+    // ETA-to-limit: minuti residui al raggiungimento del limite al burn rate corrente.
+    // Mostra solo se il rate è non-zero e l'ETA è dentro la finestra residua —
+    // altrimenti il limite non sarà mai raggiunto in questa finestra.
+    float eta_min = -1.0f;
+    if (d.win_elapsed_min > 0 && d.win_limit_usd > 0.001f
+        && d.win_cost_usd < d.win_limit_usd) {
+      float per_min = d.win_cost_usd / (float)d.win_elapsed_min;
+      if (per_min > 1e-6f) {
+        eta_min = (d.win_limit_usd - d.win_cost_usd) / per_min;
+      }
+    }
+    if (eta_min > 0.0f && eta_min < (float)d.win_remaining_min) {
+      int em = (int)eta_min;
+      lv_obj_set_style_text_color(win_eta_lbl,
+                                  em < 30 ? COL_DANGER : COL_WARN,
+                                  LV_PART_MAIN);
+      if (em < 60) {
+        lv_label_set_text_fmt(win_eta_lbl, "ETA limite: %dm", em);
+      } else {
+        lv_label_set_text_fmt(win_eta_lbl, "ETA limite: %dh %02dm",
+                              em / 60, em % 60);
+      }
+    } else {
+      lv_label_set_text(win_eta_lbl, "");
+    }
   } else {
     lv_label_set_text(win_msg_lbl, "0%");
-    lv_obj_set_style_text_color(win_msg_lbl, lv_color_hex(0x666666), LV_PART_MAIN);
+    lv_obj_set_style_text_color(win_msg_lbl, COL_FG_MUTED, LV_PART_MAIN);
     lv_label_set_text(win_cost_lbl, "$0.00");
     lv_label_set_text(win_tokens_lbl, "");
-    lv_bar_set_value(win_elapsed_bar, 0, LV_ANIM_OFF);
+    lv_bar_set_value(win_time_bar, 0, LV_ANIM_OFF);
+    lv_bar_set_value(win_limit_bar, 0, LV_ANIM_OFF);
+    lv_label_set_text(win_time_val_lbl, "0h 00m");
+    lv_label_set_text(win_limit_val_lbl, "0%");
+    lv_label_set_text(win_eta_lbl, "");
     lv_label_set_text(win_reset_lbl, "nessuna finestra attiva");
   }
 
