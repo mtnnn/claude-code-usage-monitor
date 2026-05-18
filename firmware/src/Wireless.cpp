@@ -4,11 +4,19 @@ volatile bool wifi_connected = false;
 
 static const char* s_ssid = nullptr;
 static const char* s_pass = nullptr;
+static uint8_t  s_disconnect_count = 0;
+static uint32_t s_first_disconnect_ms = 0;
+
+// Soglia: 3 disconnect in 30s SENZA un GOT_IP intermedio => persistent fail.
+static const uint8_t  FAIL_THRESHOLD = 3;
+static const uint32_t FAIL_WINDOW_MS = 30000;
 
 static void on_wifi_event(WiFiEvent_t event) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       wifi_connected = true;
+      s_disconnect_count = 0;
+      s_first_disconnect_ms = 0;
       Serial.printf("[WiFi] connected, IP=%s RSSI=%d dBm\n",
                     WiFi.localIP().toString().c_str(), WiFi.RSSI());
       break;
@@ -17,6 +25,15 @@ static void on_wifi_event(WiFiEvent_t event) {
         Serial.println("[WiFi] disconnected, retrying...");
       }
       wifi_connected = false;
+      {
+        uint32_t now = millis();
+        if (s_disconnect_count == 0 || (now - s_first_disconnect_ms) > FAIL_WINDOW_MS) {
+          s_first_disconnect_ms = now;
+          s_disconnect_count = 1;
+        } else {
+          s_disconnect_count++;
+        }
+      }
       if (s_ssid && s_pass) {
         WiFi.begin(s_ssid, s_pass);
       }
@@ -29,6 +46,8 @@ static void on_wifi_event(WiFiEvent_t event) {
 void WiFi_Connect_STA(const char* ssid, const char* pass) {
   s_ssid = ssid;
   s_pass = pass;
+  s_disconnect_count = 0;
+  s_first_disconnect_ms = 0;
   WiFi.onEvent(on_wifi_event);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -40,4 +59,16 @@ void WiFi_Connect_STA(const char* ssid, const char* pass) {
 String WiFi_LocalIP() {
   if (!wifi_connected) return String("0.0.0.0");
   return WiFi.localIP().toString();
+}
+
+void WiFi_ResetFailCount() {
+  s_disconnect_count = 0;
+  s_first_disconnect_ms = 0;
+}
+
+bool WiFi_HasFailedPersistently() {
+  if (wifi_connected) return false;
+  if (s_disconnect_count < FAIL_THRESHOLD) return false;
+  uint32_t now = millis();
+  return (now - s_first_disconnect_ms) <= FAIL_WINDOW_MS;
 }
