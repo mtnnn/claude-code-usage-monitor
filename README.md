@@ -10,6 +10,16 @@
 ![ui](https://img.shields.io/badge/UI-LVGL%208.3-purple)
 ![license](https://img.shields.io/badge/license-GPLv3-green)
 
+> **Note (2026-05-18)** — the git history of this repository was rewritten
+> for privacy reasons. If you cloned before this date, run:
+> ```bash
+> git fetch origin && git reset --hard origin/main
+> git fetch --tags --force
+> ```
+> Tags `v0.1.0`–`v0.2.2` point to new commit hashes; the
+> [v0.2.0 firmware binary](https://github.com/rootedlab-code/claude-code-usage-monitor/releases/download/v0.2.0/firmware-waveshare-esp32s3-lcd147-v0.2.0.bin)
+> is unchanged.
+
 ---
 
 ## Why
