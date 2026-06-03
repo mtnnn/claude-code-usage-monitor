@@ -24,14 +24,6 @@ static lv_obj_t* win_limit_val_lbl;
 static lv_obj_t* win_eta_lbl;        // popolata in M4 (ETA-to-limit)
 static lv_obj_t* win_reset_lbl;
 
-// Tab Modelli
-#define MODEL_ROWS 5
-static lv_obj_t* model_row[MODEL_ROWS];
-static lv_obj_t* model_name_lbl[MODEL_ROWS];
-static lv_obj_t* model_cost_lbl[MODEL_ROWS];
-static lv_obj_t* model_bar[MODEL_ROWS];
-static lv_obj_t* model_empty_lbl;
-
 static uint8_t  active_panel = 0;
 static bool     auto_rotate = true;
 static uint32_t rotate_paused_until = 0;
@@ -173,55 +165,6 @@ static void build_window_panel(lv_obj_t* p) {
   lv_obj_align(win_reset_lbl, LV_ALIGN_BOTTOM_MID, 0, -4);
 }
 
-// Tab 3: MODELLI
-static void build_models_panel(lv_obj_t* p) {
-  lv_obj_t* hdr = lv_label_create(p);
-  lv_label_set_text(hdr, LV_SYMBOL_OK " MODELLI (MESE)");
-  lv_obj_set_style_text_color(hdr, COL_FG_DIM, LV_PART_MAIN);
-  lv_obj_set_style_text_font(hdr, FONT_SMALL, LV_PART_MAIN);
-  lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 4);
-
-  int row_h = 44;
-  int top_y = 26;
-  for (int i = 0; i < MODEL_ROWS; i++) {
-    model_row[i] = lv_obj_create(p);
-    lv_obj_remove_style_all(model_row[i]);
-    lv_obj_set_size(model_row[i], PANEL_W - 12, row_h);
-    lv_obj_set_pos(model_row[i], 6, top_y + i * (row_h + 4));
-    lv_obj_set_style_bg_color(model_row[i], COL_BG_CARD, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(model_row[i], LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(model_row[i], 4, LV_PART_MAIN);
-    lv_obj_clear_flag(model_row[i], LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(model_row[i], LV_OBJ_FLAG_HIDDEN);
-
-    model_name_lbl[i] = lv_label_create(model_row[i]);
-    lv_label_set_text(model_name_lbl[i], "");
-    lv_obj_set_style_text_color(model_name_lbl[i], COL_FG, LV_PART_MAIN);
-    lv_obj_set_style_text_font(model_name_lbl[i], FONT_SMALL, LV_PART_MAIN);
-    lv_obj_set_pos(model_name_lbl[i], 6, 4);
-
-    model_cost_lbl[i] = lv_label_create(model_row[i]);
-    lv_label_set_text(model_cost_lbl[i], "");
-    lv_obj_set_style_text_color(model_cost_lbl[i], COL_ACCENT_COST, LV_PART_MAIN);
-    lv_obj_set_style_text_font(model_cost_lbl[i], FONT_SMALL, LV_PART_MAIN);
-    lv_obj_align(model_cost_lbl[i], LV_ALIGN_TOP_RIGHT, -6, 4);
-
-    model_bar[i] = lv_bar_create(model_row[i]);
-    lv_obj_set_size(model_bar[i], PANEL_W - 32, 6);
-    lv_obj_set_pos(model_bar[i], 6, 28);
-    lv_bar_set_range(model_bar[i], 0, 100);
-    lv_bar_set_value(model_bar[i], 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(model_bar[i], COL_BAR_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(model_bar[i], COL_ACCENT_TOK, LV_PART_INDICATOR);
-  }
-
-  model_empty_lbl = lv_label_create(p);
-  lv_label_set_text(model_empty_lbl, "Nessun dato");
-  lv_obj_set_style_text_color(model_empty_lbl, COL_FG_MUTED, LV_PART_MAIN);
-  lv_obj_set_style_text_font(model_empty_lbl, FONT_SMALL, LV_PART_MAIN);
-  lv_obj_align(model_empty_lbl, LV_ALIGN_CENTER, 0, 0);
-}
-
 // Helper one-shot per fade-out: nasconde il panel a fine animazione.
 // NB: NON chiamare lv_timer_del nel callback: lv_timer_set_repeat_count(tm, 1)
 // fa già auto-delete dopo la singola esecuzione. Doppio delete = UAF.
@@ -294,7 +237,7 @@ void UsageUI_Init() {
   ui_cost_build(panels[0]);
   build_window_panel(panels[1]);
   ui_chart_build(panels[2]);
-  build_models_panel(panels[3]);
+  ui_models_build(panels[3]);
 
   // primo panel visibile senza fade
   active_panel = 0;
@@ -414,27 +357,5 @@ void UsageUI_Update(const UsageData& d) {
   ui_chart_update(d);
 
   // --- Modelli ---
-  uint8_t n = d.n_models;
-  if (n > MODEL_ROWS) n = MODEL_ROWS;
-  float total_cost = 0.0f;
-  for (int i = 0; i < n; i++) total_cost += d.models[i].cost_usd;
-  if (total_cost < 0.001f) total_cost = 1.0f;
-
-  for (int i = 0; i < MODEL_ROWS; i++) {
-    if (i < n) {
-      lv_obj_clear_flag(model_row[i], LV_OBJ_FLAG_HIDDEN);
-      char nm[24];
-      ui_short_model_name(d.models[i].name, nm, sizeof(nm));
-      lv_label_set_text(model_name_lbl[i], nm);
-      char mc[20];
-      ui_fmt_money(mc, sizeof(mc), d.models[i].cost_usd);
-      lv_label_set_text(model_cost_lbl[i], mc);
-      int p = (int)((d.models[i].cost_usd / total_cost) * 100.0f);
-      lv_bar_set_value(model_bar[i], p, LV_ANIM_OFF);
-    } else {
-      lv_obj_add_flag(model_row[i], LV_OBJ_FLAG_HIDDEN);
-    }
-  }
-  if (n == 0) lv_obj_clear_flag(model_empty_lbl, LV_OBJ_FLAG_HIDDEN);
-  else        lv_obj_add_flag(model_empty_lbl,   LV_OBJ_FLAG_HIDDEN);
+  ui_models_update(d);
 }
