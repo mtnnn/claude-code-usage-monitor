@@ -59,7 +59,19 @@ static bool fetch_once(UsageData& tmp) {
     return false;
   }
 
-  // ~2-4KB tipico, lascio crescere dinamicamente
+  // Difesa-in-profondità: se il server dichiara una risposta molto più grande
+  // del previsto (~2-4KB tipico), non proviamo nemmeno a deserializzarla — così
+  // un endpoint inatteso non può forzare un'allocazione enorme sul device.
+  // Content-Length -1 (sconosciuto, es. dietro un proxy chunked) resta permesso.
+  static const int MAX_RESPONSE_BYTES = 32 * 1024;
+  int declared = http.getSize();
+  if (declared > MAX_RESPONSE_BYTES) {
+    Serial.printf("[UsageClient] risposta dichiarata troppo grande (%d B), ignoro\n",
+                  declared);
+    http.end();
+    return false;
+  }
+
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, http.getStream());
   http.end();
