@@ -1,10 +1,11 @@
 #include "UsageUI.h"
 #include "UsageUI_theme.h"
-#include "UsageUI_format.h"
 #include "UsageUI_internal.h"
-#include "Display_ST7789.h"
-#include <stdio.h>
-#include <string.h>
+#include <Arduino.h>   // millis()
+
+// Core UI: status bar, container dei pannelli, rotazione/navigazione tab,
+// orchestrazione (Init) e dispatch di UsageUI_Update verso i moduli pannello.
+// I 4 pannelli e gli overlay (splash/portal/toast) vivono in UsageUI_*.cpp.
 
 // ----- Stato widget -----
 static lv_obj_t* status_dot;
