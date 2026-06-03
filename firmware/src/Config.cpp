@@ -38,18 +38,27 @@ static AppConfig g;
 
 void Config::load() {
   Preferences p;
-  if (!p.begin(NS, /*readonly=*/true)) {
-    // Namespace non esiste ancora — usa solo i fallback
+  if (p.begin(NS, /*readonly=*/true)) {
+    g.wifi_ssid    = p.getString(K_SSID,   WIFI_SSID);
+    g.wifi_pass    = p.getString(K_PASS,   WIFI_PASS);
+    g.bridge_host  = p.getString(K_HOST,   BRIDGE_HOST);
+    g.bridge_port  = p.getUShort(K_PORT,   BRIDGE_PORT);
+    g.bridge_token = p.getString(K_TOKEN,  BRIDGE_TOKEN);
+    g.poll_ms      = p.getULong (K_POLL,   POLL_INTERVAL_MS);
+    g.auto_rotate  = p.getBool  (K_ROTATE, true);
     p.end();
+  } else {
+    // Namespace NVS non ancora creato: usa i fallback da secrets.h senza
+    // interrogare un handle Preferences chiuso (prima ci si affidava al fatto
+    // che la libreria ritorni il default su handle non aperto).
+    g.wifi_ssid    = WIFI_SSID;
+    g.wifi_pass    = WIFI_PASS;
+    g.bridge_host  = BRIDGE_HOST;
+    g.bridge_port  = BRIDGE_PORT;
+    g.bridge_token = BRIDGE_TOKEN;
+    g.poll_ms      = POLL_INTERVAL_MS;
+    g.auto_rotate  = true;
   }
-  g.wifi_ssid    = p.getString(K_SSID,   WIFI_SSID);
-  g.wifi_pass    = p.getString(K_PASS,   WIFI_PASS);
-  g.bridge_host  = p.getString(K_HOST,   BRIDGE_HOST);
-  g.bridge_port  = p.getUShort(K_PORT,   BRIDGE_PORT);
-  g.bridge_token = p.getString(K_TOKEN,  BRIDGE_TOKEN);
-  g.poll_ms      = p.getULong (K_POLL,   POLL_INTERVAL_MS);
-  g.auto_rotate  = p.getBool  (K_ROTATE, true);
-  p.end();
 
   Serial.printf("[Config] SSID=\"%s\" host=\"%s\" port=%u poll=%u rotate=%d token=%s\n",
                 g.wifi_ssid.c_str(), g.bridge_host.c_str(),
