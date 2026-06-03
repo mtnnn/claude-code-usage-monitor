@@ -54,7 +54,8 @@ WiFi and renders four LVGL views on a 172×320 TFT.
   token generated on first run and persisted with mode 0600.
 - **Prometheus `/metrics` endpoint** for Grafana scraping.
 - **Captive portal provisioning** (v0.2): no recompile to change WiFi /
-  bridge / token — first boot or BOOT-button reset opens a setup AP.
+  bridge / token — first boot or BOOT-button reset opens a WPA2-protected
+  setup AP (one-time random password shown on the display).
 - **BOOT button gestures**: tap = next tab, long-press = toggle auto-rotate,
   very-long-press = reset NVS.
 - **Robust**: dedup by `message.id` (Claude Code rewrites the same assistant
@@ -236,9 +237,11 @@ If the upload fails: hold **BOOT**, tap **RESET**, release **RESET**, release
 
 If you left `secrets.h` empty, the device boots into setup mode:
 
-1. The display shows `Modalità Setup` + AP name `ClaudeMonitor-XXYY` + the
-   URL `http://192.168.4.1`.
-2. On your phone, join the open `ClaudeMonitor-XXYY` network.
+1. The display shows `Modalità Setup` + AP name `ClaudeMonitor-XXYY` + a
+   one-time **WPA2 password** + the URL `http://192.168.4.1`.
+2. On your phone, join the `ClaudeMonitor-XXYY` network using the password
+   shown on the display (a fresh random password is generated each time the
+   setup AP starts).
 3. Most OS show a captive-portal notification automatically; otherwise open
    `http://192.168.4.1` in any browser.
 4. Pick your WiFi from the scan dropdown, paste the **bridge IP** and

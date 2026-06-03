@@ -13,6 +13,13 @@ Cosa difendiamo:
   generato al primo avvio e salvato in `~/.claude-code-usage/token` (permessi
   `0600`, directory `0700`).
 - **Scan opportunistici** di porte 8787 sulla LAN: senza token rispondiamo `401`.
+- **Accesso opportunistico all'AP di setup (captive portal).** L'AP
+  `ClaudeMonitor-XXYY` è protetto WPA2 con una password casuale generata a ogni
+  avvio del portal e mostrata solo sul display del device — serve prossimità
+  fisica per leggerla. Il bearer token del bridge non viene ripopolato nel form
+  web (non riflettiamo un segreto), e un portal entrato per fallimento WiFi si
+  riavvia automaticamente dopo un timeout invece di restare un AP a tempo
+  indeterminato.
 
 Cosa NON difendiamo (out of scope in v0.2):
 
