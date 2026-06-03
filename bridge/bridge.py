@@ -493,7 +493,10 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
             return constant_time_eq(hdr[7:].strip(), token)
 
         def do_GET(self):  # noqa: N802
-            if self.path.startswith("/usage"):
+            # Normalizza: confronto esatto sul path senza query string, così
+            # /usage?x=1 funziona ma /usagexyz no (prima startswith lo accettava).
+            path = self.path.split("?", 1)[0]
+            if path == "/usage":
                 if not self._authorized():
                     self._send_unauthorized()
                     return
@@ -505,7 +508,7 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
                     # non leakare stack trace o path su LAN.
                     sys.stderr.write(f"[error] /usage: {e!r}\n")
                     self._send_json(500, {"error": "internal error"})
-            elif self.path == "/metrics":
+            elif path == "/metrics":
                 if not (metrics_anon or self._authorized()):
                     self._send_unauthorized()
                     return
@@ -520,7 +523,7 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
                 except Exception as e:
                     sys.stderr.write(f"[error] /metrics: {e!r}\n")
                     self._send_json(500, {"error": "internal error"})
-            elif self.path == "/health":
+            elif path == "/health":
                 # Liveness probe — sempre anonimo
                 self._send_json(200, {"ok": True})
             else:
