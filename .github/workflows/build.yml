@@ -16,6 +16,8 @@ jobs:
         run: python -m py_compile bridge/bridge.py
       - name: pricing.json valid
         run: python -c "import json; json.load(open('bridge/pricing.json'))"
+      - name: Unit tests
+        run: python -m unittest discover -s bridge -p 'test_*.py'
 
   firmware:
     runs-on: ubuntu-latest

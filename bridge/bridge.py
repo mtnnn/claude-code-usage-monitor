@@ -28,6 +28,9 @@ DEFAULT_PRICING_FILE = Path(__file__).parent / "pricing.json"
 TOKEN_DIR = Path.home() / ".claude-code-usage"
 TOKEN_PATH = TOKEN_DIR / "token"
 
+# Durata della finestra rate-limit rolling di Claude Code (ore).
+WINDOW_HOURS = 5
+
 # USD per 1M tokens. Editabile via pricing.json.
 DEFAULT_PRICING = {
     "claude-opus-4-7":    {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
@@ -87,13 +90,112 @@ def parse_ts(s: str) -> dt.datetime | None:
         return None
 
 
+def compute_window5h(
+    anchor_ts: list[dt.datetime],
+    msgs: list[tuple[dt.datetime, float, int, int]],
+    now: dt.datetime,
+    plan_limit_5h: float,
+    window_hours: int = WINDOW_HOURS,
+) -> dict:
+    """Calcola lo stato della finestra rate-limit rolling di `window_hours` ore.
+
+    Pura: nessun I/O, nessuna chiamata a now() interna — `now` è iniettato, così
+    la logica resta deterministica e testabile.
+
+    - anchor_ts: timestamp (user + assistant) entro la finestra recente. Una
+      nuova finestra inizia quando un timestamp supera di >window_hours lo start
+      della finestra precedente (Anthropic misura dal primo messaggio della
+      richiesta, non dal completamento della generazione).
+    - msgs: tuple (ts, cost_usd, tokens_in, tokens_out) dei soli assistant
+      message, per sommare costo/token della finestra attiva.
+    """
+    window5h = {
+        "active": False,
+        "messages": 0,
+        "cost_usd": 0.0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "elapsed_min": 0,
+        "remaining_min": window_hours * 60,
+        "limit_usd": round(plan_limit_5h, 2),
+        "limit_pct": 0,
+        "start": None,
+        "reset_at": None,
+    }
+
+    window_start: dt.datetime | None = None
+    for ts in sorted(anchor_ts):
+        if window_start is None or ts > window_start + dt.timedelta(hours=window_hours):
+            window_start = ts
+
+    if window_start is None:
+        return window5h
+
+    reset_at = window_start + dt.timedelta(hours=window_hours)
+    if reset_at <= now:
+        # Finestra già scaduta: nessuna finestra attiva.
+        return window5h
+
+    wm = wi = wo = 0
+    wc = 0.0
+    for ts, c, i, o in msgs:
+        if ts >= window_start:
+            wm += 1
+            wc += c
+            wi += i
+            wo += o
+
+    elapsed_s = (now - window_start).total_seconds()
+    remaining_s = (reset_at - now).total_seconds()
+    limit_pct = 0
+    if plan_limit_5h > 0.001:
+        limit_pct = int(round(wc / plan_limit_5h * 100))
+
+    window5h.update({
+        "active": True,
+        "messages": wm,
+        "cost_usd": round(wc, 4),
+        "tokens_in": wi,
+        "tokens_out": wo,
+        "elapsed_min": max(0, int(elapsed_s / 60)),
+        "remaining_min": max(0, int(remaining_s / 60)),
+        "limit_pct": max(0, min(999, limit_pct)),
+        "start": window_start.astimezone().replace(microsecond=0).isoformat(),
+        "reset_at": reset_at.astimezone().replace(microsecond=0).isoformat(),
+    })
+    return window5h
+
+
+def file_is_relevant(
+    file_mtime_ts: float, oldest_needed_date: dt.date, buffer_days: int = 2
+) -> bool:
+    """True se un file con questo mtime PUÒ contribuire a qualche vista.
+
+    Un transcript è append-only: tutti i timestamp di riga sono <= mtime del
+    file. Quindi se l'mtime è anteriore alla data più vecchia richiesta da una
+    vista (meno un buffer per clock skew / timezone), il file è ininfluente e
+    può essere saltato senza riaprirlo — è questa l'ottimizzazione che evita di
+    rileggere tutta la storia ad ogni refresh.
+
+    NB: non copre i file ripristinati da backup con mtime datato ma contenuto
+    recente — per quel caso esiste il flag --rescan-all.
+    """
+    cutoff = (
+        dt.datetime.combine(oldest_needed_date, dt.time.min).astimezone()
+        - dt.timedelta(days=buffer_days)
+    )
+    return file_mtime_ts >= cutoff.timestamp()
+
+
 class Aggregator:
     """Aggrega tutti i transcript JSONL in 4 viste."""
 
-    def __init__(self, pricing: dict, budget_monthly_usd: float, plan_limit_5h_usd: float):
+    def __init__(self, pricing: dict, budget_monthly_usd: float,
+                 plan_limit_5h_usd: float, rescan_all: bool = False):
         self.pricing = pricing
         self.budget = budget_monthly_usd
         self.plan_limit_5h = plan_limit_5h_usd
+        self.rescan_all = rescan_all
 
     def collect(self) -> dict:
         now = dt.datetime.now(dt.timezone.utc).astimezone()
@@ -111,7 +213,6 @@ class Aggregator:
         # - recent_anchor_ts: TUTTI i timestamp (user + assistant) per trovare
         #   il vero start della finestra (Anthropic misura dalla richiesta user,
         #   non dalla fine generazione assistant — differenza tipica 10-30s/min).
-        WINDOW_HOURS = 5
         recent_msgs: list[tuple[dt.datetime, float, int, int]] = []
         recent_anchor_ts: list[dt.datetime] = []
         recent_cutoff = now - dt.timedelta(hours=WINDOW_HOURS * 2)
@@ -121,10 +222,20 @@ class Aggregator:
         # per non contare lo stesso usage 2-5 volte.
         seen_msg_ids: set[str] = set()
 
+        # Data più vecchia che una vista può richiedere: il min tra inizio mese
+        # (vista "month") e 7 giorni fa (vista "last7"); la finestra 5h è sempre
+        # più recente. I file con mtime anteriore vengono saltati (vedi
+        # file_is_relevant), a meno di --rescan-all.
+        oldest_needed = min(month_start, seven_days_ago)
+
         files = glob.glob(str(PROJECTS_DIR / "**" / "*.jsonl"), recursive=True)
 
         for path in files:
             try:
+                if not self.rescan_all and not file_is_relevant(
+                    os.path.getmtime(path), oldest_needed
+                ):
+                    continue
                 with open(path, "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         line = line.strip()
@@ -187,63 +298,10 @@ class Aggregator:
             except OSError:
                 continue
 
-        # ----- Calcolo finestra 5h -----
-        # Cammino TUTTI i timestamp (user + assistant) in ordine cronologico.
-        # Una nuova finestra inizia quando trovo un timestamp oltre 5h da
-        # quello di partenza della finestra precedente. Il primo user message
-        # rappresenta il vero start (Anthropic lo misura da quando riceve la
-        # richiesta API, non dal completion).
-        recent_anchor_ts.sort()
-        recent_msgs.sort(key=lambda r: r[0])
-        window_start: dt.datetime | None = None
-        for ts in recent_anchor_ts:
-            if window_start is None or ts > window_start + dt.timedelta(hours=WINDOW_HOURS):
-                window_start = ts
-
-        window5h = {
-            "active": False,
-            "messages": 0,
-            "cost_usd": 0.0,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "elapsed_min": 0,
-            "remaining_min": WINDOW_HOURS * 60,
-            "limit_usd": round(self.plan_limit_5h, 2),
-            "limit_pct": 0,
-            "start": None,
-            "reset_at": None,
-        }
-        if window_start is not None:
-            reset_at = window_start + dt.timedelta(hours=WINDOW_HOURS)
-            if reset_at > now:
-                # Finestra ancora attiva: somma assistant messages da window_start in poi
-                wm = 0
-                wc = 0.0
-                wi = 0
-                wo = 0
-                for ts, c, i, o in recent_msgs:
-                    if ts >= window_start:
-                        wm += 1
-                        wc += c
-                        wi += i
-                        wo += o
-                elapsed_s = (now - window_start).total_seconds()
-                remaining_s = (reset_at - now).total_seconds()
-                limit_pct = 0
-                if self.plan_limit_5h > 0.001:
-                    limit_pct = int(round(wc / self.plan_limit_5h * 100))
-                window5h.update({
-                    "active": True,
-                    "messages": wm,
-                    "cost_usd": round(wc, 4),
-                    "tokens_in": wi,
-                    "tokens_out": wo,
-                    "elapsed_min": max(0, int(elapsed_s / 60)),
-                    "remaining_min": max(0, int(remaining_s / 60)),
-                    "limit_pct": max(0, min(999, limit_pct)),
-                    "start": window_start.astimezone().replace(microsecond=0).isoformat(),
-                    "reset_at": reset_at.astimezone().replace(microsecond=0).isoformat(),
-                })
+        # ----- Calcolo finestra 5h (logica pura, testabile) -----
+        window5h = compute_window5h(
+            recent_anchor_ts, recent_msgs, now, self.plan_limit_5h, WINDOW_HOURS
+        )
 
         last7 = []
         for i in range(6, -1, -1):
@@ -317,15 +375,23 @@ def load_or_create_token(explicit: str | None) -> str:
     tok = _secrets.token_urlsafe(24)
     try:
         TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-        TOKEN_PATH.write_text(tok)
+        try:
+            os.chmod(TOKEN_DIR, 0o700)
+        except OSError:
+            pass  # Windows / FS non-POSIX: best-effort
+        # Scrittura atomica con 0600 fin dalla creazione: nessuna finestra in
+        # cui il token è leggibile da altri utenti locali (il chmod-dopo lo
+        # consentiva), e nessun file troncato a metà se il processo muore
+        # durante la scrittura (write-tmp + replace).
+        tmp = TOKEN_PATH.with_name(TOKEN_PATH.name + ".tmp")
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, tok.encode("utf-8"))
+        finally:
+            os.close(fd)
+        os.replace(str(tmp), str(TOKEN_PATH))
     except OSError as e:
         print(f"[warn] impossibile salvare token in {TOKEN_PATH}: {e}")
-        return tok
-    try:
-        os.chmod(TOKEN_PATH, 0o600)
-        os.chmod(TOKEN_DIR, 0o700)
-    except OSError:
-        pass  # Windows / FS non-POSIX: best-effort
     return tok
 
 
@@ -365,7 +431,10 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            # Niente Access-Control-Allow-Origin: gli endpoint sono autenticati
+            # (bearer token) e i consumer — firmware ESP32 e scraper Prometheus —
+            # non sono browser, quindi non serve CORS. Un "*" su un endpoint con
+            # auth è un anti-pattern: non lo esponiamo.
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
@@ -462,6 +531,10 @@ def main():
                     help="Disabilita autenticazione (sconsigliato, stampa warning)")
     ap.add_argument("--metrics-anon", action="store_true",
                     help="Espone /metrics senza autenticazione (per scraper Prometheus)")
+    ap.add_argument("--rescan-all", action="store_true",
+                    help="Riscansiona TUTTI i transcript a ogni refresh, ignorando l'mtime "
+                         "(default: salta i file troppo vecchi per contribuire). Usalo se "
+                         "ripristini transcript da backup con mtime datato.")
     args = ap.parse_args()
 
     if not PROJECTS_DIR.exists():
@@ -469,7 +542,7 @@ def main():
 
     pricing = load_pricing()
     plan_limit = args.plan_limit if args.plan_limit is not None else PLAN_PRESETS[args.plan]
-    agg = Aggregator(pricing, args.budget, plan_limit)
+    agg = Aggregator(pricing, args.budget, plan_limit, rescan_all=args.rescan_all)
     cache = CachedAggregator(agg, ttl_seconds=args.ttl)
 
     require_auth = not args.no_auth

@@ -84,6 +84,7 @@ Per scraping anonimo da Prometheus/Grafana: avvia il bridge con `--metrics-anon`
 | `--token` | (auto) | Token esplicito (skip persistenza) |
 | `--no-auth` | off | Disabilita auth (sconsigliato) |
 | `--metrics-anon` | off | Espone `/metrics` senza token |
+| `--rescan-all` | off | Rilegge tutti i transcript ogni volta (vedi nota sotto) |
 
 ## Schema risposta `/usage`
 
@@ -145,5 +146,9 @@ systemctl --user enable --now claude-bridge.service
 
 - I JSONL sono letti read-only ad ogni richiesta (con cache TTL 2s in RAM per non
   rileggere migliaia di righe ad ogni poll dell'ESP32).
+- Per non riscansionare tutta la storia a ogni refresh, i file il cui `mtime` è
+  troppo vecchio per contribuire a una vista (mese / 7 giorni / finestra 5h)
+  vengono saltati. Se ripristini transcript da backup con `mtime` datato ma
+  contenuto recente, avvia con `--rescan-all` per forzare lo scan completo.
 - Funziona anche se Claude Code non è in esecuzione: i transcript restano su disco.
 - Non viene esposto nessun dato sensibile dei prompt — solo aggregati di costo/token.
