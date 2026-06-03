@@ -339,21 +339,56 @@ class Aggregator:
 
 # ----- Cache leggera in RAM per evitare ri-scan a ogni richiesta -----
 class CachedAggregator:
-    def __init__(self, agg: Aggregator, ttl_seconds: float = 2.0):
+    """Cache in RAM con TTL.
+
+    Lo scan (`agg.collect()`) NON viene eseguito tenendo il lock dei dati: i
+    lettori che hanno già un valore in cache (anche scaduto) lo ricevono subito
+    mentre un singolo thread fa il refresh, invece di serializzarsi per tutta la
+    durata dello scan. Un solo refresh per volta (`_refresh_lock`) evita il
+    thundering herd. `clock` è iniettabile per rendere il TTL testabile.
+    """
+
+    def __init__(self, agg: Aggregator, ttl_seconds: float = 2.0,
+                 clock=time.monotonic):
         self.agg = agg
         self.ttl = ttl_seconds
-        self._lock = threading.Lock()
+        self._clock = clock
+        self._lock = threading.Lock()          # protegge solo _cached/_cached_at
+        self._refresh_lock = threading.Lock()  # garantisce un refresh per volta
         self._cached: dict | None = None
         self._cached_at: float = 0.0
 
-    def get(self) -> dict:
+    def _fresh(self) -> dict | None:
         with self._lock:
-            if self._cached and (time.monotonic() - self._cached_at) < self.ttl:
+            if self._cached is not None and (self._clock() - self._cached_at) < self.ttl:
                 return self._cached
-            data = self.agg.collect()
-            self._cached = data
-            self._cached_at = time.monotonic()
+            return None
+
+    def get(self) -> dict:
+        cached = self._fresh()
+        if cached is not None:
+            return cached
+
+        with self._lock:
+            stale = self._cached  # può essere None solo al primo avvio
+
+        # Cache miss. Un solo thread fa lo scan (refresh_lock). Se esiste già un
+        # valore (anche scaduto) e un altro thread sta già rinfrescando, lo
+        # restituiamo subito invece di bloccarci per la durata dello scan.
+        got_lock = self._refresh_lock.acquire(blocking=(stale is None))
+        if not got_lock:
+            return stale  # stale è garantito non-None quando acquire è non-bloccante
+        try:
+            cached = self._fresh()  # un altro thread potrebbe aver appena rinfrescato
+            if cached is not None:
+                return cached
+            data = self.agg.collect()  # fuori dal lock dei dati
+            with self._lock:
+                self._cached = data
+                self._cached_at = self._clock()
             return data
+        finally:
+            self._refresh_lock.release()
 
 
 def load_or_create_token(explicit: str | None) -> str:

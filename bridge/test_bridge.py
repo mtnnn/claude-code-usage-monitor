@@ -11,6 +11,7 @@ import datetime as dt
 import os
 import stat
 import tempfile
+import threading
 import unittest
 import unittest.mock
 
@@ -189,6 +190,93 @@ class TestLoadOrCreateToken(unittest.TestCase):
                 bridge.load_or_create_token(None)
             self.assertEqual(stat.S_IMODE(os.stat(token_path).st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(os.stat(token_dir).st_mode), 0o700)
+
+
+class _FakeClock:
+    """Clock iniettabile per testare il TTL senza tempo reale."""
+
+    def __init__(self, t=0.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, seconds):
+        self.t += seconds
+
+
+class _CountingAgg:
+    """Aggregator finto che conta le chiamate a collect()."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def collect(self):
+        self.calls += 1
+        return {"v": self.calls}
+
+
+class _BlockingAgg:
+    """collect() della seconda chiamata in poi si blocca finché il test non la
+    sblocca — per verificare il comportamento sotto contesa."""
+
+    def __init__(self):
+        self.calls = 0
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def collect(self):
+        self.calls += 1
+        if self.calls > 1:
+            self.started.set()
+            self.release.wait(timeout=5)
+        return {"v": self.calls}
+
+
+class TestCachedAggregator(unittest.TestCase):
+    def test_within_ttl_returns_cache_without_rescanning(self):
+        clock = _FakeClock(100.0)
+        agg = _CountingAgg()
+        cache = bridge.CachedAggregator(agg, ttl_seconds=2.0, clock=clock)
+        self.assertEqual(cache.get(), {"v": 1})
+        clock.advance(1.0)  # < TTL
+        self.assertEqual(cache.get(), {"v": 1})
+        self.assertEqual(agg.calls, 1)
+
+    def test_after_ttl_rescans(self):
+        clock = _FakeClock(100.0)
+        agg = _CountingAgg()
+        cache = bridge.CachedAggregator(agg, ttl_seconds=2.0, clock=clock)
+        cache.get()
+        clock.advance(2.5)  # > TTL
+        self.assertEqual(cache.get(), {"v": 2})
+        self.assertEqual(agg.calls, 2)
+
+    def test_stale_value_is_served_while_a_refresh_is_in_progress(self):
+        clock = _FakeClock(0.0)
+        agg = _BlockingAgg()
+        cache = bridge.CachedAggregator(agg, ttl_seconds=2.0, clock=clock)
+        self.assertEqual(cache.get(), {"v": 1})  # collect #1, non blocca
+        clock.advance(3.0)                        # scaduto
+
+        result = {}
+
+        def worker():
+            result["v"] = cache.get()  # collect #2 -> si blocca dentro collect()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        self.assertTrue(agg.started.wait(timeout=5))  # il worker è dentro collect()
+
+        # Mentre il worker scansiona, un altro lettore riceve subito il valore
+        # vecchio invece di bloccarsi.
+        self.assertEqual(cache.get(), {"v": 1})
+
+        agg.release.set()                  # sblocca il worker
+        t.join(timeout=5)
+        self.assertEqual(result["v"], {"v": 2})
+        self.assertEqual(agg.calls, 2)     # esattamente uno scan in più
+        self.assertEqual(cache.get(), {"v": 2})  # entro il nuovo TTL
 
 
 if __name__ == "__main__":
