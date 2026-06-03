@@ -38,8 +38,11 @@ WiFi and renders four LVGL views on a 172×320 TFT.
 
 ## Features
 
-- **5-hour window tracker** with countdown — closely matches the official
-  Anthropic dashboard (within a few percent / few minutes).
+- **5-hour window tracker** with countdown. Note this is a **cost-based
+  estimate**: Anthropic's real limit is opaque and usage-based, so the figure
+  is a proxy (it tracks dollar spend against your plan's estimated 5h budget),
+  not a reading of the official meter. The reset countdown is exact; the
+  utilization percentage is an approximation.
 - **Cost views**: today + yesterday + 7-day sparkline trend, this month, full
   7-day bar chart, top-N model breakdown.
 - **Dual progress bars on the 5h tab**: time elapsed (purple) and limit
