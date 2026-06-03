@@ -22,9 +22,10 @@ void UsageUI_DismissSplash();
 bool UsageUI_SplashVisible();
 
 // ===== Captive portal panel =====
-// Mostra un pannello full-screen con "Modalità Setup", AP name, URL.
-// L'UI principale resta in background (i 4 panel sono nascosti).
-void UsageUI_ShowPortal(const char* ap_name, const char* ap_ip);
+// Mostra un pannello full-screen con "Modalità Setup", AP name, password WPA2
+// e URL. L'UI principale resta in background (i 4 panel sono nascosti).
+// ap_pass == nullptr/"" => la riga password non viene mostrata.
+void UsageUI_ShowPortal(const char* ap_name, const char* ap_ip, const char* ap_pass = nullptr);
 void UsageUI_HidePortal();
 
 // ===== Navigazione manuale (pulsante BOOT, M4) =====

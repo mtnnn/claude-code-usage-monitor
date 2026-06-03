@@ -8,9 +8,10 @@
 // per inserire SSID/password WiFi + host/port/token del bridge.
 namespace Portal {
 
-// Avvia softAP + DNSServer (catch-all → 192.168.4.1) + WebServer su porta 80.
-// L'AP è aperto (no password). Dopo Portal::start chiama Portal::loop() ad
-// ogni iterazione del main loop per servire DNS e HTTP.
+// Avvia softAP (WPA2, password casuale per-sessione mostrata sul display)
+// + DNSServer (catch-all → 192.168.4.1) + WebServer su porta 80. Dopo
+// Portal::start chiama Portal::loop() ad ogni iterazione del main loop per
+// servire DNS e HTTP.
 void start();
 
 // Da chiamare nel main loop quando isRunning() == true.
@@ -23,5 +24,8 @@ String apName();
 
 // IP dell'AP — sempre "192.168.4.1" finché il portal è attivo.
 String apIp();
+
+// Password WPA2 dell'AP (casuale, generata in start()) — da mostrare sul display.
+String apPassword();
 
 } // namespace Portal

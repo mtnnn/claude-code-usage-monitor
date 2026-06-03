@@ -27,6 +27,9 @@ static uint32_t fetch_pulse_until = 0;
 static uint32_t splash_until_ms = 0;
 static bool     splash_dismissed = false;
 static bool     in_portal_mode = false;
+static uint32_t portal_entered_ms = 0;
+static bool     portal_can_timeout = false;
+static const uint32_t PORTAL_TIMEOUT_MS = 5 * 60 * 1000;  // 5 min
 
 static void rgb_set_status(bool online, bool pulse) {
   if (pulse) {
@@ -40,10 +43,16 @@ static void rgb_set_status(bool online, bool pulse) {
 
 static void enter_portal_mode() {
   in_portal_mode = true;
+  // Se avevamo già una config valida siamo qui per un fallimento WiFi:
+  // possiamo riavviare dopo un timeout per ritentare. Al primo boot (config
+  // assente) non c'è nulla da ritentare, quindi restiamo nel portal.
+  portal_can_timeout = Config::isProvisioned();
+  portal_entered_ms = millis();
   Portal::start();
   UsageUI_DismissSplash();        // se splash ancora attiva
   splash_dismissed = true;
-  UsageUI_ShowPortal(Portal::apName().c_str(), Portal::apIp().c_str());
+  UsageUI_ShowPortal(Portal::apName().c_str(), Portal::apIp().c_str(),
+                     Portal::apPassword().c_str());
   Set_Color(0, 0, 60);            // blu = setup mode
 }
 
@@ -98,6 +107,14 @@ void loop() {
 
   if (in_portal_mode) {
     Portal::loop();
+    // Se siamo nel portal per un fallimento WiFi (config già valida), dopo un
+    // timeout riavviamo per ritentare: evita di restare un AP indefinitamente
+    // se nel frattempo il router torna disponibile.
+    if (portal_can_timeout && (millis() - portal_entered_ms > PORTAL_TIMEOUT_MS)) {
+      Serial.println("[portal] timeout — reboot per ritentare il WiFi");
+      delay(50);
+      ESP.restart();
+    }
     return;
   }
 

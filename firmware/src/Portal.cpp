@@ -3,12 +3,14 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <esp_random.h>
 
 static WebServer s_web(80);
 static DNSServer s_dns;
 static bool      s_running = false;
 static String    s_ap_name;
 static String    s_ap_ip;
+static String    s_ap_pass;
 
 // ===== Helpers =====
 
@@ -123,7 +125,11 @@ static void handle_root() {
   body += "</div>";
 
   body += "<label>Bridge token <small>(da bridge.py)</small></label>";
-  body += "<input type='password' name='token' value='" + escape_html(c.bridge_token) + "'>";
+  // Il token NON viene ripopolato: e' un segreto e non va riflesso nel form.
+  // Se l'utente lascia vuoto al salvataggio, handle_save preserva quello esistente.
+  body += "<input type='password' name='token' placeholder='"
+          + String(c.bridge_token.length() ? "(invariato se lasci vuoto)" : "incolla il token")
+          + "'>";
 
   body += "<label>Polling (ms) — min 1000, max 60000</label>";
   body += "<input type='number' name='poll' min='1000' max='60000' value='" + String(c.poll_ms) + "'>";
@@ -161,6 +167,10 @@ static void handle_save() {
   String pass  = s_web.arg("pass");
   String host  = s_web.arg("host");   host.trim();
   String token = s_web.arg("token");  token.trim();
+  // Token vuoto = "invariato": preserva quello gia' salvato (non lo
+  // ripopoliamo nel form, quindi un re-save per cambiare solo il WiFi non
+  // deve cancellarlo).
+  if (token.length() == 0) token = Config::get().bridge_token;
   long   port_l = s_web.arg("port").toInt();
   long   poll_l = s_web.arg("poll").toInt();
 
@@ -216,7 +226,19 @@ void Portal::start() {
   char ap[24];
   snprintf(ap, sizeof(ap), "ClaudeMonitor-%02X%02X", mac[4], mac[5]);
   s_ap_name = ap;
-  WiFi.softAP(ap);
+
+  // Password WPA2 casuale (RNG hardware), mostrata sul display durante il
+  // setup. NON derivata dal MAC: il BSSID viaggia in chiaro nei beacon e il
+  // firmware e' open-source, quindi una derivazione dal MAC sarebbe
+  // ricostruibile da un attaccante. Una pwd casuale per-sessione no.
+  static const char PW_ALPHABET[] = "abcdefghjkmnpqrstuvwxyz23456789";
+  const size_t alpha_n = sizeof(PW_ALPHABET) - 1;
+  char pw[9];
+  for (uint8_t i = 0; i < 8; i++) pw[i] = PW_ALPHABET[esp_random() % alpha_n];
+  pw[8] = 0;
+  s_ap_pass = pw;
+
+  WiFi.softAP(ap, pw);
   s_ap_ip = WiFi.softAPIP().toString();
 
   // Catch-all DNS → l'IP dell'AP
@@ -230,8 +252,8 @@ void Portal::start() {
   s_web.begin();
 
   s_running = true;
-  Serial.printf("[Portal] AP=%s IP=%s — apri http://%s\n",
-                ap, s_ap_ip.c_str(), s_ap_ip.c_str());
+  Serial.printf("[Portal] AP=%s pass=%s IP=%s — apri http://%s\n",
+                ap, pw, s_ap_ip.c_str(), s_ap_ip.c_str());
 }
 
 void Portal::loop() {
@@ -240,6 +262,7 @@ void Portal::loop() {
   s_web.handleClient();
 }
 
-bool   Portal::isRunning() { return s_running; }
-String Portal::apName()    { return s_ap_name; }
-String Portal::apIp()      { return s_ap_ip;   }
+bool   Portal::isRunning()  { return s_running; }
+String Portal::apName()     { return s_ap_name; }
+String Portal::apIp()       { return s_ap_ip;   }
+String Portal::apPassword() { return s_ap_pass; }
