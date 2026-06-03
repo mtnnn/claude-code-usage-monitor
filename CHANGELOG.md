@@ -5,6 +5,49 @@ Tutte le modifiche notevoli a questo progetto sono documentate qui. Formato basa
 
 ## [Unreleased]
 
+### Security
+- Captive portal: l'AP di setup è ora protetto **WPA2** con una password
+  casuale per-sessione mostrata sul display (prima era aperto). Il bearer token
+  del bridge non viene più ripopolato nel form web; se lasciato vuoto al
+  salvataggio, quello esistente viene preservato. Un portal entrato per
+  fallimento WiFi si riavvia dopo un timeout invece di restare un AP a tempo
+  indeterminato.
+- Bridge: il file token viene scritto in modo atomico con permessi `0600` fin
+  dalla creazione (niente finestra in cui è leggibile da altri utenti locali).
+- Bridge: rimosso `Access-Control-Allow-Origin: *` dagli endpoint autenticati.
+
+### Added
+- Bridge: flag `--rescan-all` per forzare la riscansione di tutti i transcript
+  (utile se si ripristinano file da backup con `mtime` datato).
+
+### Changed
+- Bridge: di default i transcript con `mtime` troppo vecchio per contribuire a
+  una vista vengono saltati, evitando di rileggere tutta la storia a ogni
+  refresh (`--rescan-all` per disattivare).
+- README: la finestra 5h è ora descritta come **stima basata sul costo** (il
+  limite reale di Anthropic è opaco/usage-based); `SECURITY.md` copre ora anche
+  il threat model del captive portal.
+
+### Fixed
+- Bridge: lo scan del filesystem non viene più eseguito tenendo il lock della
+  cache — richieste `/usage` e `/metrics` concorrenti non si serializzano più
+  per l'intera durata dello scan (single-flight, niente thundering herd).
+- Bridge: routing di `/usage` con match esatto e tollerante alla query string
+  (prima `startswith` catturava anche path tipo `/usagexyz`).
+- Firmware: `UsageClient` rifiuta risposte `/usage` dichiarate molto più grandi
+  del previsto (guard su Content-Length, difesa-in-profondità).
+- Firmware: `Config::load` non usa più l'handle `Preferences` dopo `end()`
+  quando `begin()` fallisce.
+
+### Internal
+- Bridge: prima suite di test unitari (stdlib `unittest`, 22 test) eseguita in
+  CI; logica della finestra 5h estratta in funzione pura.
+- Firmware: `UsageUI.cpp` (~850 righe) suddiviso in moduli per responsabilità
+  (tema, formato, 4 pannelli, splash/portal/toast); il core scende a ~170 righe.
+  Comportamento invariato.
+- CI: GitHub Actions aggiornate a versioni compatibili con Node 24
+  (checkout v5, setup-python v6, cache v5).
+
 ## [0.2.0] — 2026-05-18
 
 ### Added — Sicurezza
