@@ -1,5 +1,6 @@
 #include "UsageUI.h"
 #include "UsageUI_theme.h"
+#include "UsageUI_format.h"
 #include "Display_ST7789.h"
 #include <stdio.h>
 #include <string.h>
@@ -54,48 +55,6 @@ static lv_obj_t* model_empty_lbl;
 static uint8_t  active_panel = 0;
 static bool     auto_rotate = true;
 static uint32_t rotate_paused_until = 0;
-
-// ----- Helper di formattazione -----
-static void fmt_money(char* dst, size_t cap, float v) {
-  if (v >= 1000.0f) snprintf(dst, cap, "$%.0f", v);
-  else              snprintf(dst, cap, "$%.2f", v);
-}
-
-static void fmt_tokens(char* dst, size_t cap, uint64_t v) {
-  if (v < 1000ULL)              snprintf(dst, cap, "%llu", (unsigned long long)v);
-  else if (v < 1000000ULL)      snprintf(dst, cap, "%.1fK", v / 1000.0);
-  else if (v < 1000000000ULL)   snprintf(dst, cap, "%.2fM", v / 1000000.0);
-  else                          snprintf(dst, cap, "%.2fB", v / 1000000000.0);
-}
-
-// estrae sigla modello: "claude-opus-4-7" -> "Opus 4.7"
-static void short_model_name(const char* full, char* dst, size_t cap) {
-  if (!full || !*full) { snprintf(dst, cap, "?"); return; }
-  // cerca opus/sonnet/haiku
-  const char* fam = nullptr;
-  if (strstr(full, "opus"))   fam = "Opus";
-  else if (strstr(full, "sonnet")) fam = "Sonnet";
-  else if (strstr(full, "haiku"))  fam = "Haiku";
-  else { snprintf(dst, cap, "%s", full); return; }
-
-  // estrai prima coppia di numeri "4-7" -> "4.7"
-  int maj = 0, min = -1;
-  const char* p = full;
-  while (*p) {
-    if (*p >= '0' && *p <= '9') {
-      maj = atoi(p);
-      while (*p >= '0' && *p <= '9') p++;
-      if (*p == '-' && p[1] >= '0' && p[1] <= '9') {
-        min = atoi(p + 1);
-      }
-      break;
-    }
-    p++;
-  }
-  if (min >= 0) snprintf(dst, cap, "%s %d.%d", fam, maj, min);
-  else if (maj > 0) snprintf(dst, cap, "%s %d", fam, maj);
-  else snprintf(dst, cap, "%s", fam);
-}
 
 // ----- Costruzione UI -----
 
@@ -651,15 +610,15 @@ void UsageUI_Update(const UsageData& d) {
 
   // --- Costo ---
   char buf[40];
-  fmt_money(buf, sizeof(buf), d.today_cost_usd);
+  ui_fmt_money(buf, sizeof(buf), d.today_cost_usd);
   lv_label_set_text(today_cost_lbl, buf);
-  fmt_money(buf, sizeof(buf), d.month_cost_usd);
+  ui_fmt_money(buf, sizeof(buf), d.month_cost_usd);
   lv_label_set_text(month_cost_lbl, buf);
 
   // "ieri $X.YZ" da last7[5] (index 6 = oggi)
   if (d.last7_cost[5] > 0.001f) {
     char yb[16];
-    fmt_money(yb, sizeof(yb), d.last7_cost[5]);
+    ui_fmt_money(yb, sizeof(yb), d.last7_cost[5]);
     lv_label_set_text_fmt(yesterday_lbl, "ieri %s", yb);
   } else {
     lv_label_set_text(yesterday_lbl, "");
@@ -705,13 +664,13 @@ void UsageUI_Update(const UsageData& d) {
       lv_label_set_text_fmt(win_cost_lbl, "$%.2f / $%.0f",
                             d.win_cost_usd, d.win_limit_usd);
     } else {
-      fmt_money(buf, sizeof(buf), d.win_cost_usd);
+      ui_fmt_money(buf, sizeof(buf), d.win_cost_usd);
       lv_label_set_text(win_cost_lbl, buf);
     }
 
     // messaggi assistant + token compatti
     char wo[16];
-    fmt_tokens(wo, sizeof(wo), d.win_tokens_out);
+    ui_fmt_tokens(wo, sizeof(wo), d.win_tokens_out);
     lv_label_set_text_fmt(win_tokens_lbl, "%u msg  |  out %s",
                           (unsigned)d.win_messages, wo);
 
@@ -801,10 +760,10 @@ void UsageUI_Update(const UsageData& d) {
     if (i < n) {
       lv_obj_clear_flag(model_row[i], LV_OBJ_FLAG_HIDDEN);
       char nm[24];
-      short_model_name(d.models[i].name, nm, sizeof(nm));
+      ui_short_model_name(d.models[i].name, nm, sizeof(nm));
       lv_label_set_text(model_name_lbl[i], nm);
       char mc[20];
-      fmt_money(mc, sizeof(mc), d.models[i].cost_usd);
+      ui_fmt_money(mc, sizeof(mc), d.models[i].cost_usd);
       lv_label_set_text(model_cost_lbl[i], mc);
       int p = (int)((d.models[i].cost_usd / total_cost) * 100.0f);
       lv_bar_set_value(model_bar[i], p, LV_ANIM_OFF);
