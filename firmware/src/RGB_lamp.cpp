@@ -31,18 +31,16 @@ uint8_t RGB_Data[192][3] = {
   {57, 0, 8},  {58, 0, 7},  {59, 0, 6},  {60, 0, 5},  {61, 0, 4},  {62, 0, 3},  {63, 0, 2},  {64, 0, 1}
 };
 // data range -> Red:0~255  Green:0~255  Blue:0~255
+//
+// T-Display-S3 port: there is no onboard addressable RGB LED, and GPIO38 (the
+// Waveshare RGB_LED_PIN) is the LCD backlight here — driving it as a NeoPixel
+// would fight the backlight PWM. So the status-LED API is kept (main.cpp calls
+// Set_Color) but neutralised to no-ops. Connection status is shown on-screen.
 void Set_Color(uint8_t Red,uint8_t Green,uint8_t Blue)                                            // Set RGB bead color
 {
-  neopixelWrite(RGB_LED_PIN, Red, Green, Blue);
+  (void)Red; (void)Green; (void)Blue;
 }
 void RGB_Lamp_Loop(uint16_t Waiting)
-{ 
-  Time++;
-  if(Time == Waiting){
-    Time = 0;
-    Number++;
-    if(Number == 192)
-      Number = 0;
-    Set_Color( RGB_Data[Number][0]*3, RGB_Data[Number][1]*3, RGB_Data[Number][2]*3);  // Color
-  }
+{
+  (void)Waiting;
 }
