@@ -11,9 +11,9 @@ struct ModelStat {
 };
 
 struct UsageData {
-  bool      online;            // ultima poll riuscita?
-  uint32_t  last_update_ms;    // millis() all'ultimo success
-  uint32_t  fetch_count;       // numero di poll riusciti (per anim "live")
+  bool      online;            // last poll succeeded?
+  uint32_t  last_update_ms;    // millis() at the last success
+  uint32_t  fetch_count;       // number of successful polls (for "live" anim)
 
   float    today_cost_usd;
   uint64_t today_tokens_in;
@@ -27,7 +27,7 @@ struct UsageData {
 
   float    budget_monthly_usd;
 
-  // Finestra 5h corrente (Claude Code rate-limit window)
+  // Current 5h window (Claude Code rate-limit window)
   bool     win_active;
   uint32_t win_messages;
   float    win_cost_usd;
@@ -35,10 +35,10 @@ struct UsageData {
   uint64_t win_tokens_out;
   uint16_t win_elapsed_min;
   uint16_t win_remaining_min;
-  float    win_limit_usd;       // limite del piano (es. $200 per Max 5x)
-  uint16_t win_limit_pct;       // 0-100+ (può sforare 100 se sopra limite)
+  float    win_limit_usd;       // plan limit (e.g. $200 for Max 5x)
+  uint16_t win_limit_pct;       // 0-100+ (can exceed 100 if over limit)
 
-  // Ultimi 7 giorni: index 0 = 6 giorni fa, index 6 = oggi
+  // Last 7 days: index 0 = 6 days ago, index 6 = today
   float    last7_cost[7];
   char     last7_label[7][4];   // "10", "11", ...
 
@@ -46,11 +46,17 @@ struct UsageData {
   uint8_t   n_models;
 };
 
-// Avvia un task FreeRTOS dedicato che fa polling del bridge.
-// host: es. "192.168.1.42", port: 8787, interval_ms: cadenza poll
-// token: bearer token bridge (stringa vuota => header omesso, compatibilità v0.1)
+// Start a dedicated FreeRTOS task that polls the bridge.
+// host: e.g. "192.168.1.42", port: 8787, interval_ms: poll cadence
+// token: bridge bearer token (empty string => header omitted, v0.1 compatibility)
 void UsageClient_Begin(const char* host, uint16_t port, uint32_t interval_ms,
                        const char* token = "");
 
-// Copia atomicamente l'ultimo snapshot in out. Sicuro da chiamare dal thread UI.
+// Update the bridge target (host/port/token) at runtime without rebooting the
+// device: the poll_task will restart from the new endpoint on the next cycle. Used
+// by the control endpoint (Control) to re-point the board when the laptop's IP
+// changes. Thread-safe (protected by the same mutex as the snapshot).
+void UsageClient_SetTarget(const char* host, uint16_t port, const char* token);
+
+// Atomically copies the latest snapshot into out. Safe to call from the UI thread.
 void UsageClient_Snapshot(UsageData& out);

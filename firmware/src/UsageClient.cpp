@@ -20,7 +20,7 @@ static void copy_str(char* dst, size_t cap, const char* src) {
   dst[cap - 1] = 0;
 }
 
-// Estrae "16" da "2026-05-16" (gli ultimi 2 caratteri)
+// Extracts "16" from "2026-05-16" (the last 2 characters)
 static void date_to_day(const char* iso, char out[4]) {
   size_t n = iso ? strlen(iso) : 0;
   if (n >= 2) {
@@ -35,21 +35,35 @@ static void date_to_day(const char* iso, char out[4]) {
 static bool fetch_once(UsageData& tmp) {
   if (!wifi_connected) return false;
 
+  // Snapshot the target under the mutex: SetTarget() can rewrite it from another
+  // core (Control's HTTP handler) while this task runs. We copy into locals and
+  // release before the blocking GET so we don't hold the lock during I/O.
+  String host, token;
+  uint16_t port;
+  if (xSemaphoreTake(s_mutex, portMAX_DELAY) == pdTRUE) {
+    host  = s_host;
+    port  = s_port;
+    token = s_token;
+    xSemaphoreGive(s_mutex);
+  } else {
+    return false;
+  }
+
   HTTPClient http;
   http.setConnectTimeout(2000);
   http.setTimeout(3000);
 
-  String url = "http://" + s_host + ":" + String(s_port) + "/usage";
+  String url = "http://" + host + ":" + String(port) + "/usage";
   if (!http.begin(url)) {
     Serial.println("[UsageClient] http.begin failed");
     return false;
   }
-  if (s_token.length() > 0) {
-    http.addHeader("Authorization", String("Bearer ") + s_token);
+  if (token.length() > 0) {
+    http.addHeader("Authorization", String("Bearer ") + token);
   }
   int code = http.GET();
   if (code == 401) {
-    Serial.println("[UsageClient] HTTP 401 — bridge ha rifiutato il token, controlla BRIDGE_TOKEN");
+    Serial.println("[UsageClient] HTTP 401 — bridge rejected the token, check BRIDGE_TOKEN");
     http.end();
     return false;
   }
@@ -59,14 +73,14 @@ static bool fetch_once(UsageData& tmp) {
     return false;
   }
 
-  // Difesa-in-profondità: se il server dichiara una risposta molto più grande
-  // del previsto (~2-4KB tipico), non proviamo nemmeno a deserializzarla — così
-  // un endpoint inatteso non può forzare un'allocazione enorme sul device.
-  // Content-Length -1 (sconosciuto, es. dietro un proxy chunked) resta permesso.
+  // Defense-in-depth: if the server declares a response much larger
+  // than expected (~2-4KB typical), we don't even try to deserialize it — so
+  // an unexpected endpoint cannot force a huge allocation on the device.
+  // Content-Length -1 (unknown, e.g. behind a chunked proxy) stays allowed.
   static const int MAX_RESPONSE_BYTES = 32 * 1024;
   int declared = http.getSize();
   if (declared > MAX_RESPONSE_BYTES) {
-    Serial.printf("[UsageClient] risposta dichiarata troppo grande (%d B), ignoro\n",
+    Serial.printf("[UsageClient] declared response too large (%d B), ignoring\n",
                   declared);
     http.end();
     return false;
@@ -138,7 +152,7 @@ static void poll_task(void*) {
     bool ok = fetch_once(tmp);
     if (xSemaphoreTake(s_mutex, portMAX_DELAY) == pdTRUE) {
       if (ok) {
-        // preserva fetch_count, aggiorna i dati
+        // preserve fetch_count, update the data
         tmp.fetch_count    = s_data.fetch_count + 1;
         tmp.online         = true;
         tmp.last_update_ms = millis();
@@ -160,10 +174,24 @@ void UsageClient_Begin(const char* host, uint16_t port, uint32_t interval_ms,
   s_token = token ? token : "";
   if (!s_mutex) s_mutex = xSemaphoreCreateMutex();
   xTaskCreatePinnedToCore(poll_task, "usage_poll", 8192, nullptr, 1, nullptr, 0);
-  // Non logghiamo MAI il token su Serial.
-  Serial.printf("[UsageClient] polling http://%s:%u/usage ogni %u ms (auth %s)\n",
+  // We NEVER log the token to Serial.
+  Serial.printf("[UsageClient] polling http://%s:%u/usage every %u ms (auth %s)\n",
                 host, (unsigned)port, (unsigned)interval_ms,
                 s_token.length() > 0 ? "ON" : "OFF");
+}
+
+void UsageClient_SetTarget(const char* host, uint16_t port, const char* token) {
+  if (!s_mutex) return;  // Begin not yet called: nothing to re-point.
+  if (xSemaphoreTake(s_mutex, portMAX_DELAY) == pdTRUE) {
+    s_host  = host  ? host  : "";
+    s_port  = port;
+    s_token = token ? token : "";
+    xSemaphoreGive(s_mutex);
+  }
+  // We NEVER log the token to Serial.
+  Serial.printf("[UsageClient] target updated: http://%s:%u/usage (auth %s)\n",
+                host ? host : "", (unsigned)port,
+                (token && token[0]) ? "ON" : "OFF");
 }
 
 void UsageClient_Snapshot(UsageData& out) {

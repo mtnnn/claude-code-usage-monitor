@@ -1,10 +1,10 @@
-"""Test unitari per bridge.py — solo stdlib (unittest), eseguibili con:
+"""Unit tests for bridge.py — stdlib only (unittest), runnable with:
 
     cd bridge && python3 -m unittest test_bridge
 
-Coprono le funzioni pure: pricing, costo, parsing timestamp e — soprattutto —
-l'algoritmo della finestra rate-limit 5h (compute_window5h), che è la feature
-di punta ed è interamente euristico.
+They cover the pure functions: pricing, cost, timestamp parsing and — above
+all — the 5h rate-limit window algorithm (compute_window5h), which is the
+flagship feature and is entirely heuristic.
 """
 
 import datetime as dt
@@ -14,6 +14,7 @@ import tempfile
 import threading
 import unittest
 import unittest.mock
+import urllib.parse
 
 import bridge
 
@@ -35,8 +36,8 @@ class TestPriceFor(unittest.TestCase):
         self.assertEqual(price["input"], 15.00)
 
     def test_price_for_versioned_suffix_matches_longest_prefix(self):
-        # "claude-opus-4-7-20251201" deve matchare "claude-opus-4-7",
-        # non il prefisso più corto "claude-opus-4".
+        # "claude-opus-4-7-20251201" must match "claude-opus-4-7",
+        # not the shorter prefix "claude-opus-4".
         price = bridge.price_for("claude-opus-4-7-20251201", self.pricing)
         self.assertEqual(price["output"], 75.00)
 
@@ -88,7 +89,7 @@ class TestComputeWindow5h(unittest.TestCase):
 
     def test_window_active_burst_sums_cost_messages_and_pct(self):
         now = _ts(2026, 6, 3, 12, 0)
-        start = _ts(2026, 6, 3, 10, 0)  # 2h fa
+        start = _ts(2026, 6, 3, 10, 0)  # 2h ago
         anchors = [start, _ts(2026, 6, 3, 10, 30), _ts(2026, 6, 3, 11, 0)]
         msgs = [(start, 10.0, 100, 200), (_ts(2026, 6, 3, 11, 0), 20.0, 300, 400)]
         w = bridge.compute_window5h(anchors, msgs, now, plan_limit_5h=200.0)
@@ -103,20 +104,20 @@ class TestComputeWindow5h(unittest.TestCase):
 
     def test_window_expired_is_inactive(self):
         now = _ts(2026, 6, 3, 12, 0)
-        # Unico messaggio 6h fa: start+5h è già passato => finestra scaduta.
+        # Single message 6h ago: start+5h has already passed => window expired.
         old = _ts(2026, 6, 3, 6, 0)
         w = bridge.compute_window5h([old], [(old, 5.0, 1, 1)], now, plan_limit_5h=200.0)
         self.assertFalse(w["active"])
 
     def test_window_gap_over_5h_starts_new_window(self):
         now = _ts(2026, 6, 3, 12, 0)
-        old = _ts(2026, 6, 3, 2, 0)       # cluster vecchio (10h fa)
-        recent = _ts(2026, 6, 3, 11, 30)  # nuovo messaggio: gap > 5h
+        old = _ts(2026, 6, 3, 2, 0)       # old cluster (10h ago)
+        recent = _ts(2026, 6, 3, 11, 30)  # new message: gap > 5h
         anchors = [old, recent]
         msgs = [(old, 99.0, 1, 1), (recent, 4.0, 10, 20)]
         w = bridge.compute_window5h(anchors, msgs, now, plan_limit_5h=200.0)
         self.assertTrue(w["active"])
-        # Solo il messaggio recente conta: il vecchio precede window_start.
+        # Only the recent message counts: the old one precedes window_start.
         self.assertEqual(w["messages"], 1)
         self.assertAlmostEqual(w["cost_usd"], 4.0)
 
@@ -129,14 +130,14 @@ class TestComputeWindow5h(unittest.TestCase):
 
 class TestFileIsRelevant(unittest.TestCase):
     def _mtime(self, year, month, day):
-        # mtime POSIX della mezzanotte locale di una data (coerente col cutoff,
-        # anch'esso calcolato con .astimezone()).
+        # POSIX mtime of local midnight for a date (consistent with the cutoff,
+        # which is also computed with .astimezone()).
         return dt.datetime.combine(
             dt.date(year, month, day), dt.time.min
         ).astimezone().timestamp()
 
     def test_file_older_than_cutoff_minus_buffer_is_skipped(self):
-        oldest = dt.date(2026, 6, 1)  # cutoff = 2026-05-30 (buffer 2gg)
+        oldest = dt.date(2026, 6, 1)  # cutoff = 2026-05-30 (2-day buffer)
         self.assertFalse(
             bridge.file_is_relevant(self._mtime(2026, 5, 20), oldest, buffer_days=2)
         )
@@ -178,11 +179,11 @@ class TestLoadOrCreateToken(unittest.TestCase):
                 first = bridge.load_or_create_token(None)
                 self.assertTrue(token_path.exists())
                 self.assertEqual(token_path.read_text(), first)
-                # Seconda chiamata: deve rileggere il file, non rigenerare.
+                # Second call: must re-read the file, not regenerate.
                 second = bridge.load_or_create_token(None)
             self.assertEqual(second, first)
 
-    @unittest.skipUnless(os.name == "posix", "permessi POSIX-only")
+    @unittest.skipUnless(os.name == "posix", "POSIX-only permissions")
     def test_generated_token_file_has_0600_perms(self):
         with tempfile.TemporaryDirectory() as base:
             token_dir, token_path, ctx = self._patched_paths(base)
@@ -193,7 +194,7 @@ class TestLoadOrCreateToken(unittest.TestCase):
 
 
 class _FakeClock:
-    """Clock iniettabile per testare il TTL senza tempo reale."""
+    """Injectable clock to test the TTL without real time."""
 
     def __init__(self, t=0.0):
         self.t = t
@@ -206,7 +207,7 @@ class _FakeClock:
 
 
 class _CountingAgg:
-    """Aggregator finto che conta le chiamate a collect()."""
+    """Fake aggregator that counts calls to collect()."""
 
     def __init__(self):
         self.calls = 0
@@ -217,8 +218,8 @@ class _CountingAgg:
 
 
 class _BlockingAgg:
-    """collect() della seconda chiamata in poi si blocca finché il test non la
-    sblocca — per verificare il comportamento sotto contesa."""
+    """collect() from the second call onward blocks until the test releases it
+    — to verify the behavior under contention."""
 
     def __init__(self):
         self.calls = 0
@@ -256,27 +257,108 @@ class TestCachedAggregator(unittest.TestCase):
         clock = _FakeClock(0.0)
         agg = _BlockingAgg()
         cache = bridge.CachedAggregator(agg, ttl_seconds=2.0, clock=clock)
-        self.assertEqual(cache.get(), {"v": 1})  # collect #1, non blocca
-        clock.advance(3.0)                        # scaduto
+        self.assertEqual(cache.get(), {"v": 1})  # collect #1, does not block
+        clock.advance(3.0)                        # expired
 
         result = {}
 
         def worker():
-            result["v"] = cache.get()  # collect #2 -> si blocca dentro collect()
+            result["v"] = cache.get()  # collect #2 -> blocks inside collect()
 
         t = threading.Thread(target=worker)
         t.start()
-        self.assertTrue(agg.started.wait(timeout=5))  # il worker è dentro collect()
+        self.assertTrue(agg.started.wait(timeout=5))  # the worker is inside collect()
 
-        # Mentre il worker scansiona, un altro lettore riceve subito il valore
-        # vecchio invece di bloccarsi.
+        # While the worker is scanning, another reader gets the old value
+        # immediately instead of blocking.
         self.assertEqual(cache.get(), {"v": 1})
 
-        agg.release.set()                  # sblocca il worker
+        agg.release.set()                  # release the worker
         t.join(timeout=5)
         self.assertEqual(result["v"], {"v": 2})
-        self.assertEqual(agg.calls, 2)     # esattamente uno scan in più
-        self.assertEqual(cache.get(), {"v": 2})  # entro il nuovo TTL
+        self.assertEqual(agg.calls, 2)     # exactly one extra scan
+        self.assertEqual(cache.get(), {"v": 2})  # within the new TTL
+
+
+class TestResolveDevice(unittest.TestCase):
+    def test_returns_resolved_ipv4(self):
+        fake = [(None, None, None, None, ("192.168.1.50", 0))]
+        with unittest.mock.patch.object(bridge.socket, "getaddrinfo", return_value=fake):
+            self.assertEqual(bridge.resolve_device("claudemonitor.local"), "192.168.1.50")
+
+    def test_falls_back_when_resolution_fails(self):
+        with unittest.mock.patch.object(bridge.socket, "getaddrinfo",
+                                        side_effect=bridge.socket.gaierror("nope")):
+            self.assertEqual(
+                bridge.resolve_device("claudemonitor.local", fallback_ip="10.0.0.9"),
+                "10.0.0.9")
+
+    def test_raises_without_fallback(self):
+        with unittest.mock.patch.object(bridge.socket, "getaddrinfo",
+                                        side_effect=bridge.socket.gaierror("nope")):
+            with self.assertRaises(bridge.socket.gaierror):
+                bridge.resolve_device("claudemonitor.local")
+
+
+class TestAnnounceOnce(unittest.TestCase):
+    class _Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def test_posts_form_with_bearer_header(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["method"] = req.get_method()
+            captured["auth"] = req.get_header("Authorization")
+            captured["ctype"] = req.get_header("Content-type")
+            captured["body"] = req.data
+            return TestAnnounceOnce._Resp()
+
+        with unittest.mock.patch.object(bridge.urllib.request, "urlopen", fake_urlopen):
+            ok = bridge.announce_once("192.168.1.50", 80, "secret-tok",
+                                      "192.168.1.10", 8787)
+
+        self.assertTrue(ok)
+        self.assertEqual(captured["url"], "http://192.168.1.50:80/config")
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["auth"], "Bearer secret-tok")
+        self.assertEqual(captured["ctype"], "application/x-www-form-urlencoded")
+        # body is form-urlencoded and includes host/port/token
+        parsed = urllib.parse.parse_qs(captured["body"].decode("utf-8"))
+        self.assertEqual(parsed["host"], ["192.168.1.10"])
+        self.assertEqual(parsed["port"], ["8787"])
+        self.assertEqual(parsed["token"], ["secret-tok"])
+
+    def test_no_token_omits_auth_header(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["auth"] = req.get_header("Authorization")
+            captured["body"] = req.data
+            return TestAnnounceOnce._Resp()
+
+        with unittest.mock.patch.object(bridge.urllib.request, "urlopen", fake_urlopen):
+            ok = bridge.announce_once("192.168.1.50", 80, "", "192.168.1.10", 8787)
+
+        self.assertTrue(ok)
+        self.assertIsNone(captured["auth"])
+        parsed = urllib.parse.parse_qs(captured["body"].decode("utf-8"))
+        self.assertNotIn("token", parsed)
+
+    def test_returns_false_on_http_error(self):
+        err = bridge.urllib.error.HTTPError("http://x/config", 401, "no", {}, None)
+        with unittest.mock.patch.object(bridge.urllib.request, "urlopen", side_effect=err):
+            self.assertFalse(
+                bridge.announce_once("1.2.3.4", 80, "t", "5.6.7.8", 8787))
+
+    def test_returns_false_on_connection_error(self):
+        with unittest.mock.patch.object(bridge.urllib.request, "urlopen",
+                                        side_effect=OSError("conn refused")):
+            self.assertFalse(
+                bridge.announce_once("1.2.3.4", 80, "t", "5.6.7.8", 8787))
 
 
 if __name__ == "__main__":

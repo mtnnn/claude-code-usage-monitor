@@ -1,13 +1,13 @@
 /******************************************************************************
- *  Claude Code Usage Monitor — firmware Waveshare ESP32-S3-LCD-1.47
+ *  Claude Code Usage Monitor — firmware LilyGo T-Display-S3
  *
- *  Si connette al WiFi locale, fa polling di un bridge Python sul PC
- *  (vedi ../bridge/) ogni N secondi e mostra in tempo reale costo + token
- *  + finestra 5h + grafico 7 giorni + breakdown per modello su display
- *  ST7789 172x320.
+ *  Connects to the local WiFi, polls a Python bridge on the PC
+ *  (see ../bridge/) every N seconds and shows in real time cost + token
+ *  + 5h window + 7-day chart + per-model breakdown on an
+ *  ST7789 170x320 display.
  *
- *  v0.2: captive portal di provisioning runtime (no recompile per cambiare
- *  WiFi/bridge), bearer-token auth, polish grafico, pulsante BOOT (M4).
+ *  v0.2: runtime provisioning captive portal (no recompile to change
+ *  WiFi/bridge), bearer-token auth, chart polish, BOOT button (M4).
  ******************************************************************************/
 #include <Arduino.h>
 #include "Display_ST7789.h"
@@ -18,7 +18,9 @@
 #include "UsageUI.h"
 #include "Config.h"
 #include "Portal.h"
+#include "Control.h"
 #include "Button.h"
+#include <ESPmDNS.h>
 
 static uint32_t last_ui_update_ms = 0;
 static uint32_t last_ip_refresh_ms = 0;
@@ -30,26 +32,50 @@ static bool     in_portal_mode = false;
 static uint32_t portal_entered_ms = 0;
 static bool     portal_can_timeout = false;
 static const uint32_t PORTAL_TIMEOUT_MS = 5 * 60 * 1000;  // 5 min
+static bool     net_services_up = false;  // mDNS + Control server (STA mode)
+
+// Start/stop the network services that require the WiFi to be connected: mDNS
+// (claudemonitor.local) and the control server to re-point the bridge.
+static void start_net_services() {
+  if (net_services_up) return;
+  if (MDNS.begin("claudemonitor")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("[mDNS] claudemonitor.local active");
+  } else {
+    Serial.println("[mDNS] begin failed");
+  }
+  Control::start();
+  net_services_up = true;
+}
+
+static void stop_net_services() {
+  if (!net_services_up) return;
+  Control::stop();
+  MDNS.end();
+  net_services_up = false;
+}
 
 static void rgb_set_status(bool online, bool pulse) {
   if (pulse) {
-    Set_Color(60, 0, 120);   // viola: fetch appena riuscito
+    Set_Color(60, 0, 120);   // purple: fetch just succeeded
   } else if (online) {
-    Set_Color(0, 20, 0);     // verde tenue
+    Set_Color(0, 20, 0);     // dim green
   } else {
-    Set_Color(30, 0, 0);     // rosso tenue
+    Set_Color(30, 0, 0);     // dim red
   }
 }
 
 static void enter_portal_mode() {
   in_portal_mode = true;
-  // Se avevamo già una config valida siamo qui per un fallimento WiFi:
-  // possiamo riavviare dopo un timeout per ritentare. Al primo boot (config
-  // assente) non c'è nulla da ritentare, quindi restiamo nel portal.
+  // Free port 80 (Control uses it in STA mode) before Portal re-binds it.
+  stop_net_services();
+  // If we already had a valid config we are here because of a WiFi failure:
+  // we can reboot after a timeout to retry. On first boot (config
+  // absent) there is nothing to retry, so we stay in the portal.
   portal_can_timeout = Config::isProvisioned();
   portal_entered_ms = millis();
   Portal::start();
-  UsageUI_DismissSplash();        // se splash ancora attiva
+  UsageUI_DismissSplash();        // if splash still active
   splash_dismissed = true;
   UsageUI_ShowPortal(Portal::apName().c_str(), Portal::apIp().c_str(),
                      Portal::apPassword().c_str());
@@ -67,39 +93,39 @@ void setup() {
   Lvgl_Init();
   UsageUI_Init();
   UsageUI_Splash();
-  UsageUI_SplashSetState("Lettura config...");
+  UsageUI_SplashSetState("Reading config...");
   splash_until_ms = millis() + 2500;
 
   Config::load();
   Button::begin();
   UsageUI_SetAutoRotate(Config::get().auto_rotate);
 
-  // Nessuna config persistita né da secrets.h → portal mode.
+  // No config persisted nor from secrets.h → portal mode.
   if (!Config::isProvisioned()) {
-    Serial.println("[boot] config non valida — entro in portal mode");
+    Serial.println("[boot] config invalid — entering portal mode");
     enter_portal_mode();
     return;
   }
 
   const AppConfig& c = Config::get();
-  UsageUI_SplashSetState("Connessione WiFi...");
+  UsageUI_SplashSetState("Connecting WiFi...");
   WiFi_Connect_STA(c.wifi_ssid.c_str(), c.wifi_pass.c_str());
 
-  UsageUI_SplashSetState("Lettura bridge...");
+  UsageUI_SplashSetState("Reading bridge...");
   UsageClient_Begin(c.bridge_host.c_str(), c.bridge_port,
                     c.poll_ms, c.bridge_token.c_str());
 
-  Set_Color(0, 0, 30);  // blu tenue durante boot
+  Set_Color(0, 0, 30);  // dim blue during boot
 }
 
 void loop() {
   Timer_Loop();
 
-  // Pulsante BOOT: gestione sempre attiva, anche in portal mode
-  // (VERY_LONG da portal è meno utile ma non fa danno).
+  // BOOT button: handling always active, even in portal mode
+  // (VERY_LONG from the portal is less useful but does no harm).
   Button::Event ev = Button::poll();
   if (ev == Button::VERY_LONG) {
-    UsageUI_Toast("Reset NVS...");
+    UsageUI_Toast("Resetting NVS...");
     delay(400);
     Config::reset();  // erase + ESP.restart()
     // unreachable
@@ -107,18 +133,18 @@ void loop() {
 
   if (in_portal_mode) {
     Portal::loop();
-    // Se siamo nel portal per un fallimento WiFi (config già valida), dopo un
-    // timeout riavviamo per ritentare: evita di restare un AP indefinitamente
-    // se nel frattempo il router torna disponibile.
+    // If we are in the portal because of a WiFi failure (config already valid),
+    // after a timeout we reboot to retry: avoids staying an AP indefinitely
+    // if the router becomes available again in the meantime.
     if (portal_can_timeout && (millis() - portal_entered_ms > PORTAL_TIMEOUT_MS)) {
-      Serial.println("[portal] timeout — reboot per ritentare il WiFi");
+      Serial.println("[portal] timeout — reboot to retry the WiFi");
       delay(50);
       ESP.restart();
     }
     return;
   }
 
-  // Gesti tab/rotate validi solo fuori dal portal
+  // Tab/rotate gestures valid only outside the portal
   if (ev == Button::TAP) {
     UsageUI_NextTab();
     UsageUI_PauseRotate(30000);
@@ -127,33 +153,42 @@ void loop() {
     Config::setAutoRotate(now_on);
     Config::save();
     UsageUI_SetAutoRotate(now_on);
-    UsageUI_Toast(now_on ? "Rotazione: ON" : "Rotazione: OFF");
+    UsageUI_Toast(now_on ? "Rotate: ON" : "Rotate: OFF");
   }
 
   uint32_t now = millis();
 
-  // Fail-safe: se WiFi non si aggancia per troppo tempo, entra in portal
-  // (succede tipicamente per credenziali sbagliate o router spento).
+  // Fail-safe: if WiFi does not latch on for too long, enter the portal
+  // (typically happens with wrong credentials or a powered-off router).
   if (WiFi_HasFailedPersistently()) {
-    Serial.println("[loop] WiFi failed persistently — entro in portal mode");
+    Serial.println("[loop] WiFi failed persistently — entering portal mode");
     enter_portal_mode();
     return;
   }
 
-  // Aggiorna IP nella status bar ogni 2 secondi
+  // Network services (mDNS + Control): up when the WiFi latches on, down when
+  // it drops — so claudemonitor.local is re-announced on every reconnection.
+  if (wifi_connected) {
+    start_net_services();
+  } else if (net_services_up) {
+    stop_net_services();
+  }
+  Control::loop();
+
+  // Update IP in the status bar every 2 seconds
   if (now - last_ip_refresh_ms > 2000) {
     last_ip_refresh_ms = now;
     UsageUI_SetIp(WiFi_LocalIP().c_str());
   }
 
-  // Aggiorna UI con snapshot ogni 400 ms
+  // Update UI with snapshot every 400 ms
   if (now - last_ui_update_ms > 400) {
     last_ui_update_ms = now;
     UsageData d;
     UsageClient_Snapshot(d);
     UsageUI_Update(d);
 
-    // Dismiss splash al primo fetch riuscito o dopo timeout
+    // Dismiss splash on the first successful fetch or after timeout
     if (!splash_dismissed) {
       bool first_data = (d.fetch_count > 0);
       if (first_data || now >= splash_until_ms) {
@@ -162,7 +197,7 @@ void loop() {
       }
     }
 
-    // RGB feedback: pulse 300ms ad ogni nuovo fetch
+    // RGB feedback: 300ms pulse on every new fetch
     if (d.fetch_count != last_rgb_count) {
       last_rgb_count = d.fetch_count;
       fetch_pulse_until = now + 300;

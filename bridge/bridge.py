@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Claude Code Usage Bridge — legge i transcript JSONL di Claude Code
-(~/.claude/projects/**/*.jsonl) e li espone come JSON via HTTP per
-il firmware ESP32-S3-LCD-1.47.
+Claude Code Usage Bridge — reads Claude Code's JSONL transcripts
+(~/.claude/projects/**/*.jsonl) and exposes them as JSON over HTTP for
+the ESP32-S3-LCD-1.47 firmware.
 
-Solo stdlib Python 3.10+. Avvio:
-    python3 bridge.py                    # porta 8787, budget 500 USD
+Python 3.10+ stdlib only. Start with:
+    python3 bridge.py                    # port 8787, budget 500 USD
     python3 bridge.py --port 9000 --budget 200
 """
 
@@ -20,6 +20,9 @@ import socket
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -28,10 +31,10 @@ DEFAULT_PRICING_FILE = Path(__file__).parent / "pricing.json"
 TOKEN_DIR = Path.home() / ".claude-code-usage"
 TOKEN_PATH = TOKEN_DIR / "token"
 
-# Durata della finestra rate-limit rolling di Claude Code (ore).
+# Duration of Claude Code's rolling rate-limit window (hours).
 WINDOW_HOURS = 5
 
-# USD per 1M tokens. Editabile via pricing.json.
+# USD per 1M tokens. Editable via pricing.json.
 DEFAULT_PRICING = {
     "claude-opus-4-7":    {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
     "claude-opus-4-6":    {"input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50},
@@ -41,7 +44,7 @@ DEFAULT_PRICING = {
     "claude-sonnet-4":    {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
     "claude-haiku-4-5":   {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
     "claude-haiku-4":     {"input":  0.80, "output":  4.00, "cache_write":  1.00, "cache_read": 0.08},
-    # default fallback per modelli sconosciuti
+    # default fallback for unknown models
     "_default":           {"input":  3.00, "output": 15.00, "cache_write":  3.75, "cache_read": 0.30},
 }
 
@@ -52,14 +55,14 @@ def load_pricing():
             with DEFAULT_PRICING_FILE.open() as f:
                 return json.load(f)
         except Exception as e:
-            print(f"[warn] pricing.json non leggibile ({e}); uso default")
+            print(f"[warn] pricing.json not readable ({e}); using defaults")
     return DEFAULT_PRICING
 
 
 def price_for(model: str, pricing: dict) -> dict:
     if model in pricing:
         return pricing[model]
-    # match by prefix (es. "claude-opus-4-7-20251201" -> "claude-opus-4-7")
+    # match by prefix (e.g. "claude-opus-4-7-20251201" -> "claude-opus-4-7")
     for key in sorted(pricing.keys(), key=len, reverse=True):
         if key != "_default" and model.startswith(key):
             return pricing[key]
@@ -84,7 +87,7 @@ def parse_ts(s: str) -> dt.datetime | None:
     if not s:
         return None
     try:
-        # Es. "2026-05-16T14:45:01.824Z"
+        # e.g. "2026-05-16T14:45:01.824Z"
         return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return None
@@ -97,17 +100,17 @@ def compute_window5h(
     plan_limit_5h: float,
     window_hours: int = WINDOW_HOURS,
 ) -> dict:
-    """Calcola lo stato della finestra rate-limit rolling di `window_hours` ore.
+    """Compute the state of the rolling `window_hours`-hour rate-limit window.
 
-    Pura: nessun I/O, nessuna chiamata a now() interna — `now` è iniettato, così
-    la logica resta deterministica e testabile.
+    Pure: no I/O, no internal now() call — `now` is injected, so the logic
+    stays deterministic and testable.
 
-    - anchor_ts: timestamp (user + assistant) entro la finestra recente. Una
-      nuova finestra inizia quando un timestamp supera di >window_hours lo start
-      della finestra precedente (Anthropic misura dal primo messaggio della
-      richiesta, non dal completamento della generazione).
-    - msgs: tuple (ts, cost_usd, tokens_in, tokens_out) dei soli assistant
-      message, per sommare costo/token della finestra attiva.
+    - anchor_ts: timestamps (user + assistant) within the recent window. A new
+      window starts when a timestamp exceeds the previous window's start by
+      >window_hours (Anthropic measures from the request's first message, not
+      from the completion of generation).
+    - msgs: (ts, cost_usd, tokens_in, tokens_out) tuples for assistant messages
+      only, to sum the active window's cost/tokens.
     """
     window5h = {
         "active": False,
@@ -133,7 +136,7 @@ def compute_window5h(
 
     reset_at = window_start + dt.timedelta(hours=window_hours)
     if reset_at <= now:
-        # Finestra già scaduta: nessuna finestra attiva.
+        # Window already expired: no active window.
         return window5h
 
     wm = wi = wo = 0
@@ -169,16 +172,16 @@ def compute_window5h(
 def file_is_relevant(
     file_mtime_ts: float, oldest_needed_date: dt.date, buffer_days: int = 2
 ) -> bool:
-    """True se un file con questo mtime PUÒ contribuire a qualche vista.
+    """True if a file with this mtime CAN contribute to any view.
 
-    Un transcript è append-only: tutti i timestamp di riga sono <= mtime del
-    file. Quindi se l'mtime è anteriore alla data più vecchia richiesta da una
-    vista (meno un buffer per clock skew / timezone), il file è ininfluente e
-    può essere saltato senza riaprirlo — è questa l'ottimizzazione che evita di
-    rileggere tutta la storia ad ogni refresh.
+    A transcript is append-only: every line timestamp is <= the file's mtime.
+    So if the mtime is older than the oldest date any view needs (minus a
+    buffer for clock skew / timezone), the file is irrelevant and can be
+    skipped without reopening it — this is the optimization that avoids
+    re-reading the entire history on every refresh.
 
-    NB: non copre i file ripristinati da backup con mtime datato ma contenuto
-    recente — per quel caso esiste il flag --rescan-all.
+    Note: this does not cover files restored from backup with an old mtime but
+    recent contents — the --rescan-all flag exists for that case.
     """
     cutoff = (
         dt.datetime.combine(oldest_needed_date, dt.time.min).astimezone()
@@ -188,7 +191,7 @@ def file_is_relevant(
 
 
 class Aggregator:
-    """Aggrega tutti i transcript JSONL in 4 viste."""
+    """Aggregates all JSONL transcripts into 4 views."""
 
     def __init__(self, pricing: dict, budget_monthly_usd: float,
                  plan_limit_5h_usd: float, rescan_all: bool = False):
@@ -201,31 +204,31 @@ class Aggregator:
         now = dt.datetime.now(dt.timezone.utc).astimezone()
         today = now.date()
         month_start = today.replace(day=1)
-        seven_days_ago = today - dt.timedelta(days=6)  # ultimi 7 giorni inclusi
+        seven_days_ago = today - dt.timedelta(days=6)  # last 7 days, inclusive
 
         today_agg = {"cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0, "cache_read": 0}
         month_agg = {"cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0, "cache_read": 0}
         by_model: dict[str, dict] = {}
         per_day: dict[dt.date, float] = {}
 
-        # Per calcolare la finestra 5h teniamo:
-        # - recent_msgs: assistant message (con cost/token) per i totali
-        # - recent_anchor_ts: TUTTI i timestamp (user + assistant) per trovare
-        #   il vero start della finestra (Anthropic misura dalla richiesta user,
-        #   non dalla fine generazione assistant — differenza tipica 10-30s/min).
+        # To compute the 5h window we keep:
+        # - recent_msgs: assistant messages (with cost/tokens) for the totals
+        # - recent_anchor_ts: ALL timestamps (user + assistant) to find the
+        #   true window start (Anthropic measures from the user request, not
+        #   from the end of assistant generation — typical difference 10-30s/min).
         recent_msgs: list[tuple[dt.datetime, float, int, int]] = []
         recent_anchor_ts: list[dt.datetime] = []
         recent_cutoff = now - dt.timedelta(hours=WINDOW_HOURS * 2)
 
-        # Claude Code talvolta scrive lo stesso messaggio assistant più volte
-        # (resume/compact, tool call intermedi). Dedupplichiamo per message.id
-        # per non contare lo stesso usage 2-5 volte.
+        # Claude Code sometimes writes the same assistant message more than once
+        # (resume/compact, intermediate tool calls). We dedupe by message.id so
+        # the same usage is not counted 2-5 times.
         seen_msg_ids: set[str] = set()
 
-        # Data più vecchia che una vista può richiedere: il min tra inizio mese
-        # (vista "month") e 7 giorni fa (vista "last7"); la finestra 5h è sempre
-        # più recente. I file con mtime anteriore vengono saltati (vedi
-        # file_is_relevant), a meno di --rescan-all.
+        # Oldest date any view can need: the min of month start ("month" view)
+        # and 7 days ago ("last7" view); the 5h window is always more recent.
+        # Files with an older mtime are skipped (see file_is_relevant), unless
+        # --rescan-all is set.
         oldest_needed = min(month_start, seven_days_ago)
 
         files = glob.glob(str(PROJECTS_DIR / "**" / "*.jsonl"), recursive=True)
@@ -250,7 +253,7 @@ class Aggregator:
                         if not ts:
                             continue
 
-                        # Anchor timestamp anche per user, per il calcolo finestra
+                        # Anchor timestamp for user too, for the window calculation
                         if ev_type in ("user", "assistant") and ts >= recent_cutoff:
                             recent_anchor_ts.append(ts)
 
@@ -298,7 +301,7 @@ class Aggregator:
             except OSError:
                 continue
 
-        # ----- Calcolo finestra 5h (logica pura, testabile) -----
+        # ----- 5h window calculation (pure, testable logic) -----
         window5h = compute_window5h(
             recent_anchor_ts, recent_msgs, now, self.plan_limit_5h, WINDOW_HOURS
         )
@@ -337,15 +340,15 @@ class Aggregator:
         }
 
 
-# ----- Cache leggera in RAM per evitare ri-scan a ogni richiesta -----
+# ----- Lightweight in-RAM cache to avoid re-scanning on every request -----
 class CachedAggregator:
-    """Cache in RAM con TTL.
+    """In-RAM cache with TTL.
 
-    Lo scan (`agg.collect()`) NON viene eseguito tenendo il lock dei dati: i
-    lettori che hanno già un valore in cache (anche scaduto) lo ricevono subito
-    mentre un singolo thread fa il refresh, invece di serializzarsi per tutta la
-    durata dello scan. Un solo refresh per volta (`_refresh_lock`) evita il
-    thundering herd. `clock` è iniettabile per rendere il TTL testabile.
+    The scan (`agg.collect()`) is NOT run while holding the data lock: readers
+    that already have a cached value (even a stale one) get it immediately
+    while a single thread does the refresh, instead of serializing for the
+    whole duration of the scan. One refresh at a time (`_refresh_lock`) avoids
+    the thundering herd. `clock` is injectable to make the TTL testable.
     """
 
     def __init__(self, agg: Aggregator, ttl_seconds: float = 2.0,
@@ -353,8 +356,8 @@ class CachedAggregator:
         self.agg = agg
         self.ttl = ttl_seconds
         self._clock = clock
-        self._lock = threading.Lock()          # protegge solo _cached/_cached_at
-        self._refresh_lock = threading.Lock()  # garantisce un refresh per volta
+        self._lock = threading.Lock()          # protects only _cached/_cached_at
+        self._refresh_lock = threading.Lock()  # ensures one refresh at a time
         self._cached: dict | None = None
         self._cached_at: float = 0.0
 
@@ -370,19 +373,20 @@ class CachedAggregator:
             return cached
 
         with self._lock:
-            stale = self._cached  # può essere None solo al primo avvio
+            stale = self._cached  # can be None only on first startup
 
-        # Cache miss. Un solo thread fa lo scan (refresh_lock). Se esiste già un
-        # valore (anche scaduto) e un altro thread sta già rinfrescando, lo
-        # restituiamo subito invece di bloccarci per la durata dello scan.
+        # Cache miss. A single thread does the scan (refresh_lock). If a value
+        # already exists (even a stale one) and another thread is already
+        # refreshing, we return it immediately instead of blocking for the
+        # duration of the scan.
         got_lock = self._refresh_lock.acquire(blocking=(stale is None))
         if not got_lock:
-            return stale  # stale è garantito non-None quando acquire è non-bloccante
+            return stale  # stale is guaranteed non-None when acquire is non-blocking
         try:
-            cached = self._fresh()  # un altro thread potrebbe aver appena rinfrescato
+            cached = self._fresh()  # another thread may have just refreshed
             if cached is not None:
                 return cached
-            data = self.agg.collect()  # fuori dal lock dei dati
+            data = self.agg.collect()  # outside the data lock
             with self._lock:
                 self._cached = data
                 self._cached_at = self._clock()
@@ -392,11 +396,11 @@ class CachedAggregator:
 
 
 def load_or_create_token(explicit: str | None) -> str:
-    """Restituisce un bearer token persistente in ~/.claude-code-usage/token.
+    """Return a bearer token persisted in ~/.claude-code-usage/token.
 
-    Se `explicit` è fornito, lo usa direttamente (e non salva). Altrimenti
-    carica il file se esiste, oppure ne genera uno nuovo (24 bytes urlsafe).
-    Best-effort chmod 0600 sul file e 0700 sulla directory.
+    If `explicit` is provided, use it directly (and don't save). Otherwise load
+    the file if it exists, or generate a new one (24 urlsafe bytes).
+    Best-effort chmod 0600 on the file and 0700 on the directory.
     """
     if explicit:
         return explicit
@@ -413,11 +417,11 @@ def load_or_create_token(explicit: str | None) -> str:
         try:
             os.chmod(TOKEN_DIR, 0o700)
         except OSError:
-            pass  # Windows / FS non-POSIX: best-effort
-        # Scrittura atomica con 0600 fin dalla creazione: nessuna finestra in
-        # cui il token è leggibile da altri utenti locali (il chmod-dopo lo
-        # consentiva), e nessun file troncato a metà se il processo muore
-        # durante la scrittura (write-tmp + replace).
+            pass  # Windows / non-POSIX FS: best-effort
+        # Atomic write with 0600 from creation: no window in which the token is
+        # readable by other local users (the chmod-after approach allowed it),
+        # and no half-truncated file if the process dies during the write
+        # (write-tmp + replace).
         tmp = TOKEN_PATH.with_name(TOKEN_PATH.name + ".tmp")
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
@@ -426,7 +430,7 @@ def load_or_create_token(explicit: str | None) -> str:
             os.close(fd)
         os.replace(str(tmp), str(TOKEN_PATH))
     except OSError as e:
-        print(f"[warn] impossibile salvare token in {TOKEN_PATH}: {e}")
+        print(f"[warn] could not save token to {TOKEN_PATH}: {e}")
     return tok
 
 
@@ -466,10 +470,10 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            # Niente Access-Control-Allow-Origin: gli endpoint sono autenticati
-            # (bearer token) e i consumer — firmware ESP32 e scraper Prometheus —
-            # non sono browser, quindi non serve CORS. Un "*" su un endpoint con
-            # auth è un anti-pattern: non lo esponiamo.
+            # No Access-Control-Allow-Origin: the endpoints are authenticated
+            # (bearer token) and the consumers — ESP32 firmware and Prometheus
+            # scraper — are not browsers, so CORS is not needed. A "*" on an
+            # authenticated endpoint is an anti-pattern: we don't expose it.
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
@@ -493,8 +497,8 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
             return constant_time_eq(hdr[7:].strip(), token)
 
         def do_GET(self):  # noqa: N802
-            # Normalizza: confronto esatto sul path senza query string, così
-            # /usage?x=1 funziona ma /usagexyz no (prima startswith lo accettava).
+            # Normalize: exact comparison on the path without query string, so
+            # /usage?x=1 works but /usagexyz does not (startswith used to accept it).
             path = self.path.split("?", 1)[0]
             if path == "/usage":
                 if not self._authorized():
@@ -504,8 +508,8 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
                     data = cache.get()
                     self._send_json(200, data)
                 except Exception as e:
-                    # Log dettagli server-side, risposta generica al client per
-                    # non leakare stack trace o path su LAN.
+                    # Log details server-side, generic response to the client to
+                    # avoid leaking stack traces or paths over the LAN.
                     sys.stderr.write(f"[error] /usage: {e!r}\n")
                     self._send_json(500, {"error": "internal error"})
             elif path == "/metrics":
@@ -524,12 +528,12 @@ def make_handler(cache: CachedAggregator, token: str, require_auth: bool, metric
                     sys.stderr.write(f"[error] /metrics: {e!r}\n")
                     self._send_json(500, {"error": "internal error"})
             elif path == "/health":
-                # Liveness probe — sempre anonimo
+                # Liveness probe — always anonymous
                 self._send_json(200, {"ok": True})
             else:
                 self._send_json(404, {"error": "not found"})
 
-        def log_message(self, fmt, *args):  # silenzio log default
+        def log_message(self, fmt, *args):  # silence default logging
             sys.stdout.write(f"[{self.log_date_time_string()}] {fmt % args}\n")
 
     return Handler
@@ -546,10 +550,83 @@ def local_ip() -> str:
         return "127.0.0.1"
 
 
+# ===== Announce (reverse setup): the bridge tells the device where to find it =====
+#
+# The device always pulls /usage; only WHO communicates the address changes.
+# Instead of opening the captive portal to re-enter the laptop's IP when it
+# changes, the bridge resolves claudemonitor.local (mDNS) and POSTs its own IP
+# to the device's control endpoint. stdlib only: getaddrinfo + urllib.
+
+def resolve_device(name: str, fallback_ip: str | None = None) -> str:
+    """Resolve an mDNS/DNS hostname to an IPv4.
+
+    On macOS .local names resolve via Bonjour with no dependencies; on Linux
+    you need avahi/nss-mdns (or pass --device-ip). If resolution fails and a
+    fallback is given, return it, otherwise re-raise the exception.
+    """
+    try:
+        infos = socket.getaddrinfo(name, None, family=socket.AF_INET)
+        return infos[0][4][0]
+    except (socket.gaierror, OSError):
+        if fallback_ip:
+            return fallback_ip
+        raise
+
+
+def announce_once(device_ip: str, control_port: int, token: str,
+                  host_ip: str, bridge_port: int, timeout: float = 3.0) -> bool:
+    """POST host/port/token to the device's /config endpoint. True on HTTP 2xx.
+
+    Sends form-urlencoded (the ESP32 WebServer only exposes urlencoded bodies
+    via arg()) and repeats the token in the Authorization header for the
+    device-side check.
+    """
+    url = f"http://{device_ip}:{control_port}/config"
+    form = {"host": host_ip, "port": str(bridge_port)}
+    if token:
+        form["token"] = token
+    data = urllib.parse.urlencode(form).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except urllib.error.HTTPError as e:
+        sys.stderr.write(f"[announce] {url} -> HTTP {e.code}\n")
+        return False
+    except (urllib.error.URLError, OSError) as e:
+        sys.stderr.write(f"[announce] {url} -> {e}\n")
+        return False
+
+
+def announce_loop(device_name: str, fallback_ip: str | None, control_port: int,
+                  bridge_port: int, token: str, interval: float,
+                  stop_event: threading.Event) -> None:
+    """Periodically announce the bridge's IP to the device until stop_event is set.
+
+    local_ip() is recomputed each loop: if the laptop's IP changes during the
+    session the device is re-pointed automatically, without restarting anything.
+    """
+    while not stop_event.is_set():
+        try:
+            device_ip = resolve_device(device_name, fallback_ip)
+            host_ip = local_ip()
+            if announce_once(device_ip, control_port, token, host_ip, bridge_port):
+                sys.stdout.write(
+                    f"[announce] {device_name} ({device_ip}) ← bridge {host_ip}:{bridge_port}\n")
+        except (socket.gaierror, OSError) as e:
+            sys.stderr.write(
+                f"[announce] could not resolve {device_name}: {e} "
+                f"(pass --device-ip <ip> as fallback)\n")
+        stop_event.wait(interval)
+
+
 PLAN_PRESETS = {
-    "pro":     40.0,    # Claude Pro ~$20/mese, limite 5h stimato $40 di costo API equivalente
-    "max5":    200.0,   # Claude Max 5x ~$100/mese, limite 5h stimato $200
-    "max20":   1000.0,  # Claude Max 20x ~$200/mese, limite 5h stimato $1000
+    "pro":     40.0,    # Claude Pro ~$20/month, 5h limit estimated at $40 equivalent API cost
+    "max5":    200.0,   # Claude Max 5x ~$100/month, 5h limit estimated at $200
+    "max20":   1000.0,  # Claude Max 20x ~$200/month, 5h limit estimated at $1000
 }
 
 
@@ -557,26 +634,42 @@ def main():
     ap = argparse.ArgumentParser(description="Claude Code Usage Bridge")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8787)
-    ap.add_argument("--budget", type=float, default=500.0, help="Budget mensile USD (info mese)")
+    ap.add_argument("--budget", type=float, default=500.0, help="Monthly budget USD (month info)")
     ap.add_argument("--plan", choices=list(PLAN_PRESETS.keys()), default="max5",
-                    help="Piano per stimare il limite 5h (pro/max5/max20)")
+                    help="Plan used to estimate the 5h limit (pro/max5/max20)")
     ap.add_argument("--plan-limit", type=float, default=None,
-                    help="Override limite finestra 5h in USD (es. --plan-limit 200)")
-    ap.add_argument("--ttl", type=float, default=2.0, help="Cache TTL secondi")
+                    help="Override the 5h window limit in USD (e.g. --plan-limit 200)")
+    ap.add_argument("--ttl", type=float, default=2.0, help="Cache TTL seconds")
     ap.add_argument("--token", default=None,
-                    help="Bearer token esplicito (salta generazione/persistenza)")
+                    help="Explicit bearer token (skips generation/persistence)")
     ap.add_argument("--no-auth", action="store_true",
-                    help="Disabilita autenticazione (sconsigliato, stampa warning)")
+                    help="Disable authentication (not recommended, prints a warning)")
     ap.add_argument("--metrics-anon", action="store_true",
-                    help="Espone /metrics senza autenticazione (per scraper Prometheus)")
+                    help="Expose /metrics without authentication (for Prometheus scrapers)")
     ap.add_argument("--rescan-all", action="store_true",
-                    help="Riscansiona TUTTI i transcript a ogni refresh, ignorando l'mtime "
-                         "(default: salta i file troppo vecchi per contribuire). Usalo se "
-                         "ripristini transcript da backup con mtime datato.")
+                    help="Re-scan ALL transcripts on every refresh, ignoring the mtime "
+                         "(default: skip files too old to contribute). Use it if you "
+                         "restore transcripts from backup with an old mtime.")
+    ap.add_argument("--announce", dest="announce", action="store_true", default=True,
+                    help="Announce the bridge's IP to the device via claudemonitor.local "
+                         "(default: on). The device keeps pulling /usage.")
+    ap.add_argument("--no-announce", dest="announce", action="store_false",
+                    help="Disable the automatic announcement to the device.")
+    ap.add_argument("--device-name", default="claudemonitor.local",
+                    help="mDNS hostname of the device to re-point (default claudemonitor.local)")
+    ap.add_argument("--device-ip", default=None,
+                    help="Device IP as a fallback if mDNS does not resolve (e.g. on Linux "
+                         "without avahi)")
+    ap.add_argument("--device-control-port", type=int, default=80,
+                    help="Port of the control endpoint on the device (default 80)")
+    ap.add_argument("--announce-interval", type=float, default=30.0,
+                    help="Seconds between one announcement and the next (default 30)")
+    ap.add_argument("--announce-once", action="store_true",
+                    help="Announce once and exit (useful for tests / point-and-exit)")
     args = ap.parse_args()
 
     if not PROJECTS_DIR.exists():
-        print(f"[warn] {PROJECTS_DIR} non esiste — non verranno trovati transcript")
+        print(f"[warn] {PROJECTS_DIR} does not exist — no transcripts will be found")
 
     pricing = load_pricing()
     plan_limit = args.plan_limit if args.plan_limit is not None else PLAN_PRESETS[args.plan]
@@ -588,40 +681,67 @@ def main():
     handler_cls = make_handler(cache, token, require_auth, args.metrics_anon)
     server = ThreadingHTTPServer((args.host, args.port), handler_cls)
     ip = local_ip()
-    print(f"Claude Code Usage Bridge avviato")
-    print(f"  ascolta su:   http://{args.host}:{args.port}")
-    print(f"  IP locale:    http://{ip}:{args.port}/usage")
-    print(f"  budget mese:  {args.budget:.2f} USD")
-    print(f"  limite 5h:    {plan_limit:.2f} USD ({args.plan})")
-    print(f"  TTL cache:    {args.ttl:.1f} s")
+    print(f"Claude Code Usage Bridge started")
+    print(f"  listening on: http://{args.host}:{args.port}")
+    print(f"  local IP:     http://{ip}:{args.port}/usage")
+    print(f"  month budget: {args.budget:.2f} USD")
+    print(f"  5h limit:     {plan_limit:.2f} USD ({args.plan})")
+    print(f"  cache TTL:    {args.ttl:.1f} s")
     print(f"  projects dir: {PROJECTS_DIR}")
     print()
     if require_auth:
         short = (token[:4] + "..." + token[-4:]) if len(token) > 10 else token
-        print(f"  auth:         bearer (token persistito in {TOKEN_PATH})")
+        print(f"  auth:         bearer (token persisted in {TOKEN_PATH})")
         print(f"  token:        {token}")
         print(f"  short:        {short}")
         print()
-        print(f"Su ESP32, in secrets.h (o nel captive portal) imposta:")
+        print(f"On the ESP32, in secrets.h (or in the captive portal) set:")
         print(f"    #define BRIDGE_HOST   \"{ip}\"")
         print(f"    #define BRIDGE_PORT   {args.port}")
         print(f"    #define BRIDGE_TOKEN  \"{token}\"")
         print()
-        print(f"Test rapido:")
+        print(f"Quick test:")
         print(f"    TOK={token}")
         print(f"    curl -H \"Authorization: Bearer $TOK\" http://{ip}:{args.port}/usage")
     else:
-        print(f"  auth:         DISABILITATA (--no-auth)")
-        print(f"  WARNING: chiunque sulla rete può leggere il tuo consumo Claude Code.")
-        print(f"  Usa solo per debug locale, mai esposto a LAN/Internet.")
+        print(f"  auth:         DISABLED (--no-auth)")
+        print(f"  WARNING: anyone on the network can read your Claude Code usage.")
+        print(f"  Use only for local debugging, never exposed to LAN/Internet.")
         print()
-        print(f"Su ESP32, in secrets.h imposta:")
+        print(f"On the ESP32, in secrets.h set:")
         print(f"    #define BRIDGE_HOST  \"{ip}\"")
         print(f"    #define BRIDGE_PORT  {args.port}")
+
+    # Reverse announcement: the bridge re-points the device via mDNS, so the
+    # captive portal is no longer needed when the laptop's IP changes.
+    if args.announce or args.announce_once:
+        print()
+        print(f"  announce:     {args.device_name}:{args.device_control_port}"
+              f"{' (fallback ' + args.device_ip + ')' if args.device_ip else ''}")
+
+    if args.announce_once:
+        device_ip = resolve_device(args.device_name, args.device_ip)
+        ok = announce_once(device_ip, args.device_control_port, token, ip, args.port)
+        print(f"[announce] {args.device_name} ({device_ip}) "
+              f"{'ok' if ok else 'FAILED'} ← bridge {ip}:{args.port}")
+        return
+
+    stop_event = threading.Event()
+    if args.announce:
+        t = threading.Thread(
+            target=announce_loop,
+            args=(args.device_name, args.device_ip, args.device_control_port,
+                  args.port, token, args.announce_interval, stop_event),
+            daemon=True,
+        )
+        t.start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nArrivederci.")
+        print("\nGoodbye.")
+    finally:
+        stop_event.set()
 
 
 if __name__ == "__main__":
