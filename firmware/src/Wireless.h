@@ -4,16 +4,16 @@
 
 extern volatile bool wifi_connected;
 
-// Avvia la connessione STA. Non bloccante: la riconnessione avviene
-// automaticamente via WiFiEvent. wifi_connected riflette lo stato corrente.
+// Start the STA connection. Non-blocking: reconnection happens
+// automatically via WiFiEvent. wifi_connected reflects the current state.
 void WiFi_Connect_STA(const char* ssid, const char* pass);
 
-// IP locale come stringa (es. "192.168.1.42") oppure "0.0.0.0" se non connesso
+// Local IP as a string (e.g. "192.168.1.42") or "0.0.0.0" if not connected
 String WiFi_LocalIP();
 
-// Reset contatori interni (chiamare quando si abbandona STA per portal).
+// Reset internal counters (call when leaving STA for the portal).
 void WiFi_ResetFailCount();
 
-// True se abbiamo accumulato troppi disconnect senza un successo recente —
-// il caller può decidere di rientrare in captive portal.
+// True if we have accumulated too many disconnects without a recent success —
+// the caller can decide to re-enter the captive portal.
 bool WiFi_HasFailedPersistently();

@@ -1,114 +1,128 @@
 # Changelog
 
-Tutte le modifiche notevoli a questo progetto sono documentate qui. Formato basato su
+All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning [SemVer](https://semver.org/lang/it/).
 
 ## [Unreleased]
 
 ### Security
-- Captive portal: l'AP di setup è ora protetto **WPA2** con una password
-  casuale per-sessione mostrata sul display (prima era aperto). Il bearer token
-  del bridge non viene più ripopolato nel form web; se lasciato vuoto al
-  salvataggio, quello esistente viene preservato. Un portal entrato per
-  fallimento WiFi si riavvia dopo un timeout invece di restare un AP a tempo
-  indeterminato.
-- Bridge: il file token viene scritto in modo atomico con permessi `0600` fin
-  dalla creazione (niente finestra in cui è leggibile da altri utenti locali).
-- Bridge: rimosso `Access-Control-Allow-Origin: *` dagli endpoint autenticati.
+- Captive portal: the setup AP is now **WPA2**-protected with a random
+  per-session password shown on the display (previously it was open). The
+  bridge bearer token is no longer repopulated in the web form; if left empty
+  on save, the existing one is preserved. A portal entered due to a WiFi
+  failure restarts after a timeout instead of remaining an indefinitely
+  running AP.
+- Bridge: the token file is written atomically with `0600` permissions right
+  from creation (no window in which it is readable by other local users).
+- Bridge: removed `Access-Control-Allow-Origin: *` from authenticated endpoints.
 
 ### Added
-- Bridge: flag `--rescan-all` per forzare la riscansione di tutti i transcript
-  (utile se si ripristinano file da backup con `mtime` datato).
+- Re-pointing the bridge without the captive portal. When the laptop's IP
+  changes you no longer need to re-enter the setup AP:
+  - **Firmware**: the device advertises itself via mDNS as `claudemonitor.local`
+    and exposes, in normal mode (STA), a control endpoint on port 80
+    (`GET /` web form, `POST /config`) that updates the bridge host/port/token
+    **on the fly** (no reboot, persisted in NVS). Polling of `/usage`
+    stays unchanged. The endpoint requires the current bearer token.
+  - **Bridge**: by default it announces itself to the device (`--announce`),
+    resolving `claudemonitor.local` (Bonjour on macOS / avahi on Linux,
+    fallback `--device-ip`) and `POST`-ing its own IP to the control endpoint.
+    Network changed? Just restart (or keep running) the bridge. New flags:
+    `--no-announce`, `--device-name`, `--device-ip`, `--device-control-port`,
+    `--announce-interval`, `--announce-once`. Still stdlib only (urllib).
+- Bridge: `--rescan-all` flag to force a rescan of all transcripts
+  (useful if you restore files from a backup with an old `mtime`).
 
 ### Changed
-- Bridge: di default i transcript con `mtime` troppo vecchio per contribuire a
-  una vista vengono saltati, evitando di rileggere tutta la storia a ogni
-  refresh (`--rescan-all` per disattivare).
-- README: la finestra 5h è ora descritta come **stima basata sul costo** (il
-  limite reale di Anthropic è opaco/usage-based); `SECURITY.md` copre ora anche
-  il threat model del captive portal.
+- Bridge: by default, transcripts with an `mtime` too old to contribute to
+  a view are skipped, avoiding re-reading the entire history on every
+  refresh (`--rescan-all` to disable).
+- README: the 5h window is now described as a **cost-based estimate** (the
+  real Anthropic limit is opaque/usage-based); `SECURITY.md` now also covers
+  the captive portal threat model.
 
 ### Fixed
-- Bridge: lo scan del filesystem non viene più eseguito tenendo il lock della
-  cache — richieste `/usage` e `/metrics` concorrenti non si serializzano più
-  per l'intera durata dello scan (single-flight, niente thundering herd).
-- Bridge: routing di `/usage` con match esatto e tollerante alla query string
-  (prima `startswith` catturava anche path tipo `/usagexyz`).
-- Firmware: `UsageClient` rifiuta risposte `/usage` dichiarate molto più grandi
-  del previsto (guard su Content-Length, difesa-in-profondità).
-- Firmware: `Config::load` non usa più l'handle `Preferences` dopo `end()`
-  quando `begin()` fallisce.
+- Bridge: the filesystem scan is no longer performed while holding the cache
+  lock — concurrent `/usage` and `/metrics` requests no longer serialize
+  for the entire duration of the scan (single-flight, no thundering herd).
+- Bridge: `/usage` routing with exact match and tolerant of the query string
+  (previously `startswith` also captured paths like `/usagexyz`).
+- Firmware: `UsageClient` rejects `/usage` responses declared much larger
+  than expected (Content-Length guard, defense-in-depth).
+- Firmware: `Config::load` no longer uses the `Preferences` handle after `end()`
+  when `begin()` fails.
 
 ### Internal
-- Bridge: prima suite di test unitari (stdlib `unittest`, 22 test) eseguita in
-  CI; logica della finestra 5h estratta in funzione pura.
-- Firmware: `UsageUI.cpp` (~850 righe) suddiviso in moduli per responsabilità
-  (tema, formato, 4 pannelli, splash/portal/toast); il core scende a ~170 righe.
-  Comportamento invariato.
-- CI: GitHub Actions aggiornate a versioni compatibili con Node 24
+- Bridge: first unit test suite (stdlib `unittest`, 29 tests) run in
+  CI; the 5h window logic extracted into a pure function; coverage for
+  mDNS resolution (`resolve_device`) and device announcement (`announce_once`).
+- Firmware: `UsageUI.cpp` (~850 lines) split into modules by responsibility
+  (theme, formatting, 4 panels, splash/portal/toast); the core drops to ~170 lines.
+  Behavior unchanged.
+- CI: GitHub Actions updated to versions compatible with Node 24
   (checkout v5, setup-python v6, cache v5).
 
 ## [0.2.0] — 2026-05-18
 
-### Added — Sicurezza
-- Bridge: bearer token obbligatorio su `/usage` e `/metrics` (`hmac.compare_digest`,
-  costante in tempo). Generato in `~/.claude-code-usage/token` al primo avvio
-  con permessi `0600`. Flag `--token`, `--no-auth`, `--metrics-anon`.
-- Endpoint `/health` resta anonimo per liveness probes.
-- Endpoint `/metrics` in formato Prometheus 0.0.4 (cost today/month, window5h %, messages).
-- `SECURITY.md` con threat model e contatto per disclosure.
-- Firmware: invia `Authorization: Bearer ...` automaticamente quando `BRIDGE_TOKEN`
-  è valorizzato; log esplicito su HTTP 401; il token non viene mai stampato su Serial.
+### Added — Security
+- Bridge: bearer token required on `/usage` and `/metrics` (`hmac.compare_digest`,
+  constant-time). Generated in `~/.claude-code-usage/token` on first run
+  with `0600` permissions. Flags `--token`, `--no-auth`, `--metrics-anon`.
+- The `/health` endpoint stays anonymous for liveness probes.
+- The `/metrics` endpoint in Prometheus 0.0.4 format (cost today/month, window5h %, messages).
+- `SECURITY.md` with threat model and disclosure contact.
+- Firmware: sends `Authorization: Bearer ...` automatically when `BRIDGE_TOKEN`
+  is set; explicit log on HTTP 401; the token is never printed to Serial.
 
 ### Added — UX
-- Captive portal di provisioning runtime sull'ESP32: al primo boot (o tenendo
-  premuto BOOT >5s) il device crea un AP `ClaudeMonitor-XXYY` con form web
-  per WiFi, bridge host/port, token, cadenza poll. Config persistito in NVS.
-- Boot splash con logo, titolo, versione.
-- Palette colore unificata con accenti semantici (verde costo, ciano token,
-  ambra warning, rosso danger, viola tempo).
-- Icone LV_SYMBOL su ogni header di tab.
-- Tab "Finestra 5h": ora con due barre etichettate — `Tempo` (0-300 min, viola)
-  e `Limite` (0-100%, green→amber→red). Risolta l'ambiguità visiva di v0.1.
-- Sparkline 7 giorni in basso a destra del Tab Costo.
-- Label "ieri $X.YZ" sotto la cifra OGGI.
-- Fade transitions tra tab.
-- ETA-to-limit sul Tab Finestra 5h: estrapolazione del momento in cui finirai
-  il budget al ritmo corrente (ambra >30 min, rosso <30 min).
-- Pulsante BOOT (GPIO 0) per navigazione manuale:
-  - **Tap** (<500 ms): tab successivo, rotazione automatica in pausa 30s.
-  - **Long press** (1–5 s): toggle rotazione automatica (persistente).
-  - **Very long** (>5 s): reset NVS + reboot in captive portal.
+- Runtime provisioning captive portal on the ESP32: on first boot (or by
+  holding BOOT >5s) the device creates an AP `ClaudeMonitor-XXYY` with a web
+  form for WiFi, bridge host/port, token, and poll cadence. Config persisted in NVS.
+- Boot splash with logo, title, version.
+- Unified color palette with semantic accents (green cost, cyan token,
+  amber warning, red danger, purple time).
+- LV_SYMBOL icons on every tab header.
+- "5h window" tab: now with two labeled bars — `Time` (0-300 min, purple)
+  and `Limit` (0-100%, green→amber→red). Resolved the visual ambiguity of v0.1.
+- 7-day sparkline at the bottom right of the Cost tab.
+- "yesterday $X.YZ" label below the TODAY figure.
+- Fade transitions between tabs.
+- ETA-to-limit on the 5h window tab: extrapolation of the moment you'll run out
+  of budget at the current rate (amber >30 min, red <30 min).
+- BOOT button (GPIO 0) for manual navigation:
+  - **Tap** (<500 ms): next tab, auto-rotation paused 30s.
+  - **Long press** (1–5 s): toggle auto-rotation (persistent).
+  - **Very long** (>5 s): reset NVS + reboot into captive portal.
 
 ### Added — Repo
-- `CONTRIBUTING.md` con linee guida.
-- `CHANGELOG.md` (questo file).
-- Template per issue (`.github/ISSUE_TEMPLATE/`).
-- GitHub Actions workflow (`.github/workflows/build.yml`): py_compile per il
-  bridge, `pio run` per il firmware su ogni push/PR.
+- `CONTRIBUTING.md` with guidelines.
+- `CHANGELOG.md` (this file).
+- Issue templates (`.github/ISSUE_TEMPLATE/`).
+- GitHub Actions workflow (`.github/workflows/build.yml`): py_compile for the
+  bridge, `pio run` for the firmware on every push/PR.
 
 ### Changed
-- `secrets.h.template`: aggiunto `BRIDGE_TOKEN`. I valori vuoti sono trattati
-  come fallback per il captive portal — utenti source-build possono ancora
-  riempire tutto a compile-time.
-- README.md: nuova sezione "Setup (binary release)" come path principale,
-  "Build from source" rimane per chi vuole compilare.
+- `secrets.h.template`: added `BRIDGE_TOKEN`. Empty values are treated
+  as fallbacks for the captive portal — source-build users can still
+  fill everything in at compile-time.
+- README.md: new "Setup (binary release)" section as the main path,
+  "Build from source" remains for those who want to compile.
 
 ### Migration v0.1 → v0.2
-- Utenti che hanno già `secrets.h` riempito: aggiungete `#define BRIDGE_TOKEN ""`
-  (o il valore stampato dal bridge), poi `pio run -t upload`. Tutto resta funzionante.
-- Utenti del bridge: la prima `curl` dopo l'upgrade darà `401`. Aggiungete
-  `-H "Authorization: Bearer $(cat ~/.claude-code-usage/token)"`, o avviate con
-  `--no-auth` come comportamento legacy (warning a video).
+- Users who already have `secrets.h` filled in: add `#define BRIDGE_TOKEN ""`
+  (or the value printed by the bridge), then `pio run -t upload`. Everything keeps working.
+- Bridge users: the first `curl` after the upgrade will return `401`. Add
+  `-H "Authorization: Bearer $(cat ~/.claude-code-usage/token)"`, or start with
+  `--no-auth` for legacy behavior (warning displayed).
 
 ## [0.1.0] — 2026-05-16
 
 ### Added
-- Bridge Python stdlib-only che legge `~/.claude/projects/**/*.jsonl` ed espone
-  `/usage` con aggregati `today`, `month`, `last7`, `by_model`, `window5h`.
-- Deduplica per `message.id` (risolve ~3× inflazione costi da resume/compact).
-- Anchor finestra 5h sui timestamp user (allinea con dashboard Anthropic).
-- Preset piano `pro` / `max5` / `max20`, override con `--plan-limit`.
+- Python stdlib-only bridge that reads `~/.claude/projects/**/*.jsonl` and exposes
+  `/usage` with `today`, `month`, `last7`, `by_model`, `window5h` aggregates.
+- Deduplication by `message.id` (resolves ~3× cost inflation from resume/compact).
+- 5h window anchored on user timestamps (aligns with the Anthropic dashboard).
+- Plan presets `pro` / `max5` / `max20`, override with `--plan-limit`.
 - Pricing override via `pricing.json`.
-- Firmware Waveshare ESP32-S3-LCD-1.47 con LVGL 8.3, 4 tab auto-rotanti,
-  WiFi STA con auto-reconnect, polling HTTP 5s, status LED RGB.
+- Waveshare ESP32-S3-LCD-1.47 firmware with LVGL 8.3, 4 auto-rotating tabs,
+  WiFi STA with auto-reconnect, 5s HTTP polling, RGB status LED.

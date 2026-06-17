@@ -2,53 +2,59 @@
 
 ## Threat model
 
-Claude Code Usage Monitor è progettato per essere usato in una **rete locale fidata**
-(tipicamente la rete di casa o dell'ufficio). Il bridge gira sul tuo computer, l'ESP32
-sulla stessa LAN polla `/usage` ogni pochi secondi.
+Claude Code Usage Monitor is designed to be used on a **trusted local network**
+(typically a home or office network). The bridge runs on your computer, and the ESP32
+on the same LAN polls `/usage` every few seconds.
 
-Cosa difendiamo:
+What we defend against:
 
-- **Lettura non autorizzata dei dati di consumo da altri client sulla LAN.** Dalla
-  v0.2 ogni richiesta a `/usage` e `/metrics` deve presentare un bearer token
-  generato al primo avvio e salvato in `~/.claude-code-usage/token` (permessi
+- **Unauthorized reading of usage data by other clients on the LAN.** As of
+  v0.2, every request to `/usage` and `/metrics` must present a bearer token
+  generated on first run and saved in `~/.claude-code-usage/token` (permissions
   `0600`, directory `0700`).
-- **Scan opportunistici** di porte 8787 sulla LAN: senza token rispondiamo `401`.
-- **Accesso opportunistico all'AP di setup (captive portal).** L'AP
-  `ClaudeMonitor-XXYY` è protetto WPA2 con una password casuale generata a ogni
-  avvio del portal e mostrata solo sul display del device — serve prossimità
-  fisica per leggerla. Il bearer token del bridge non viene ripopolato nel form
-  web (non riflettiamo un segreto), e un portal entrato per fallimento WiFi si
-  riavvia automaticamente dopo un timeout invece di restare un AP a tempo
-  indeterminato.
+- **Opportunistic scans** of port 8787 on the LAN: without a token we respond `401`.
+- **Unauthorized re-pointing of the device.** The firmware's control endpoint
+  (`POST /config` on port 80, normal mode) changes where the device
+  sends its bearer token, so it requires knowledge of the current token
+  (`Authorization: Bearer` header or form field, near-constant-time
+  comparison). A LAN host that does not know the token receives a `401` and cannot
+  redirect the device toward a hostile bridge.
+- **Opportunistic access to the setup AP (captive portal).** The AP
+  `ClaudeMonitor-XXYY` is WPA2-protected with a random password generated on each
+  portal startup and shown only on the device's display — physical
+  proximity is required to read it. The bridge bearer token is not repopulated in the
+  web form (we do not reflect a secret), and a portal entered due to a WiFi failure
+  automatically restarts after a timeout instead of remaining an indefinitely
+  running AP.
 
-Cosa NON difendiamo (out of scope in v0.2):
+What we do NOT defend against (out of scope in v0.2):
 
-- **Adversari con shell access sul PC dove gira il bridge.** Possono leggere il
-  token dal filesystem o leggere direttamente i transcript JSONL.
-- **Intercettazione passiva sulla LAN** (Wi-Fi senza WPA2/3, sniffing su switch
-  non-managed): il traffico è in HTTP plain. TLS è previsto per v0.3.
-- **Esposizione su Internet.** Non esporre il bridge a Internet senza un reverse
-  proxy TLS-terminating davanti — il bearer token non sostituisce HTTPS.
-  Workaround: metti nginx/Caddy davanti a `127.0.0.1:8787` con cert Let's Encrypt
-  o tunnel SSH/Tailscale.
-- **Prompt content leakage.** Il bridge espone solo dati aggregati (cost, token
-  counts, model breakdown). I prompt e le response complete restano nei file
-  JSONL e non vengono mai trasmessi.
+- **Adversaries with shell access on the PC where the bridge runs.** They can read the
+  token from the filesystem or read the JSONL transcripts directly.
+- **Passive interception on the LAN** (Wi-Fi without WPA2/3, sniffing on
+  unmanaged switches): the traffic is plain HTTP. TLS is planned for v0.3.
+- **Exposure to the Internet.** Do not expose the bridge to the Internet without a
+  TLS-terminating reverse proxy in front — the bearer token does not replace HTTPS.
+  Workaround: put nginx/Caddy in front of `127.0.0.1:8787` with a Let's Encrypt cert
+  or an SSH/Tailscale tunnel.
+- **Prompt content leakage.** The bridge exposes only aggregated data (cost, token
+  counts, model breakdown). The full prompts and responses stay in the
+  JSONL files and are never transmitted.
 
-## Versioni supportate
+## Supported versions
 
-| Versione | Supportata |
+| Version | Supported |
 |----------|------------|
-| 0.2.x    | sì         |
-| 0.1.x    | no — passa a 0.2.x |
+| 0.2.x    | yes        |
+| 0.1.x    | no — upgrade to 0.2.x |
 
-## Segnalare una vulnerabilità
+## Reporting a vulnerability
 
-Email: **rootedlab@proton.me** con subject `[cc-monitor security]`.
+Email: **rootedlab@proton.me** with subject `[cc-monitor security]`.
 
-- Acknowledgement entro 7 giorni.
-- Fix target: 30 giorni per medium-high severity.
-- Per favore non aprire una issue pubblica prima della disclosure coordinata.
+- Acknowledgement within 7 days.
+- Fix target: 30 days for medium-high severity.
+- Please do not open a public issue before coordinated disclosure.
 
-Apprezziamo la responsible disclosure e ringraziamo chiunque ci aiuti a tenere
-il progetto sicuro per la community.
+We appreciate responsible disclosure and thank anyone who helps us keep
+the project secure for the community.

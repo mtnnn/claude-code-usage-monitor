@@ -24,7 +24,7 @@
   #define POLL_INTERVAL_MS 5000
 #endif
 
-// Le chiavi NVS sono limitate a 15 char (limite Preferences/nvs_open).
+// NVS keys are limited to 15 chars (Preferences/nvs_open limit).
 static const char* NS         = "cc-monitor";
 static const char* K_SSID     = "wifi_ssid";
 static const char* K_PASS     = "wifi_pass";
@@ -48,9 +48,9 @@ void Config::load() {
     g.auto_rotate  = p.getBool  (K_ROTATE, true);
     p.end();
   } else {
-    // Namespace NVS non ancora creato: usa i fallback da secrets.h senza
-    // interrogare un handle Preferences chiuso (prima ci si affidava al fatto
-    // che la libreria ritorni il default su handle non aperto).
+    // NVS namespace not yet created: use the fallbacks from secrets.h without
+    // querying a closed Preferences handle (previously we relied on the
+    // library returning the default on an unopened handle).
     g.wifi_ssid    = WIFI_SSID;
     g.wifi_pass    = WIFI_PASS;
     g.bridge_host  = BRIDGE_HOST;

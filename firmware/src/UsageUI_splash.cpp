@@ -1,7 +1,7 @@
 #include "UsageUI.h"
 #include "UsageUI_internal.h"
 
-// Splash overlay di boot, sopra l'UI principale.
+// Boot splash overlay, above the main UI.
 static lv_obj_t* splash_root = nullptr;
 static lv_obj_t* splash_state_lbl = nullptr;
 
@@ -51,7 +51,7 @@ void UsageUI_SplashSetState(const char* line) {
   if (splash_state_lbl && line) lv_label_set_text(splash_state_lbl, line);
 }
 
-// One-shot: auto-delete del timer è gestito da lv_timer_set_repeat_count(tm, 1).
+// One-shot: the timer's auto-delete is handled by lv_timer_set_repeat_count(tm, 1).
 static void splash_del_cb(lv_timer_t* t) {
   lv_obj_t* obj = (lv_obj_t*)t->user_data;
   if (obj) lv_obj_del(obj);

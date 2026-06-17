@@ -5,7 +5,7 @@
 #define LONG_THRESHOLD  500
 #define VLONG_THRESHOLD 5000
 
-static bool     s_last_raw = HIGH;       // pull-up: HIGH = rilasciato
+static bool     s_last_raw = HIGH;       // pull-up: HIGH = released
 static uint32_t s_stable_since = 0;
 static bool     s_pressed = false;
 static uint32_t s_press_start = 0;
@@ -30,7 +30,7 @@ Button::Event Button::poll() {
 
   bool pressed_now = (raw == LOW);
 
-  // Transizione: rilasciato → premuto
+  // Transition: released → pressed
   if (pressed_now && !s_pressed) {
     s_pressed = true;
     s_press_start = now;
@@ -38,17 +38,17 @@ Button::Event Button::poll() {
     return NONE;
   }
 
-  // Transizione: premuto → rilasciato (TAP o LONG)
+  // Transition: pressed → released (TAP or LONG)
   if (!pressed_now && s_pressed) {
     s_pressed = false;
     uint32_t held = now - s_press_start;
-    if (s_vlong_fired) return NONE;            // VERY_LONG già emesso
+    if (s_vlong_fired) return NONE;            // VERY_LONG already emitted
     if (held < LONG_THRESHOLD)   return TAP;
     if (held < VLONG_THRESHOLD)  return LONG;
-    return VERY_LONG;                          // rilasciato dopo i 5s
+    return VERY_LONG;                          // released after 5s
   }
 
-  // Ancora premuto: emetti VERY_LONG mid-press a 5s per feedback immediato
+  // Still pressed: emit VERY_LONG mid-press at 5s for immediate feedback
   if (pressed_now && s_pressed && !s_vlong_fired) {
     uint32_t held = now - s_press_start;
     if (held >= VLONG_THRESHOLD) {

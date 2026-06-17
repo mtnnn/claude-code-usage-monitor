@@ -71,20 +71,21 @@ WiFi and renders four LVGL views on a 172×320 TFT.
 
 ## Hardware
 
-This firmware targets the [**Waveshare ESP32-S3-LCD-1.47**](https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47)
-dev board:
+This firmware targets the [**LilyGo T-Display-S3**](https://www.lilygo.cc/products/t-display-s3)
+dev board (ported from the upstream [Waveshare ESP32-S3-LCD-1.47](https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47),
+which drives the same ST7789 over SPI):
 
 | | |
 |---|---|
 | SoC      | ESP32-S3R8 (Xtensa LX7 dual-core 240 MHz) |
 | Memory   | 512 KB SRAM, 8 MB OPI PSRAM, 16 MB flash |
-| Display  | 1.47" TFT ST7789, 172×320, 262K colors, SPI |
+| Display  | 1.9" TFT ST7789, 170×320, 262K colors, 8-bit parallel (i80) |
+| Backlight| GPIO 38, PWM via ledc (no onboard addressable RGB LED) |
 | Wireless | WiFi 2.4 GHz, BLE 5 |
-| RGB LED  | WS2812-compatible on GPIO 38 (status indicator) |
 | USB      | Native USB CDC/JTAG (no extra serial chip) |
 
 Should adapt to other ESP32-S3 boards with an ST7789 by tweaking pins in
-`firmware/src/Display_ST7789.h`.
+`firmware/src/Display_ST7789.h` (and the `TFT_*` flags in `platformio.ini`).
 
 ## Display in action
 
@@ -93,15 +94,15 @@ held with the USB connector to one side — 320×172 effective landscape).
 These were taken in OFFLINE state so the values show `$0.00` / `0%` and the
 status bar reads `OFFLINE` — the point is the layout, not the data.
 
-| Costo | Finestra 5h |
+| Cost | 5h window |
 |:---:|:---:|
 | ![cost tab — today and month](docs/screenshots/display-cost.jpg) | ![5h window — percentage + two bars](docs/screenshots/display-window5h.jpg) |
-| `$ OGGI` headline + `MESE` + `in attesa di dati` footer | `0%` headline + `Tempo` (violet) + `Limite` (green→amber→red) bars + status text |
+| `$ TODAY` headline + `MONTH` + `waiting for data...` footer | `0%` headline + `Time` (violet) + `Limit` (green→amber→red) bars + status text |
 
-| Ultimi 7 giorni | Modelli (Mese) |
+| Last 7 days | Models (Month) |
 |:---:|:---:|
 | ![7-day chart](docs/screenshots/display-7days.jpg) | ![per-model breakdown](docs/screenshots/display-models.jpg) |
-| `ULTIMI 7 GIORNI` with auto-scaled bars | `MODELLI (MESE)` — empty here ("Nessun dato"), normally lists top 5 |
+| `LAST 7 DAYS` with auto-scaled bars | `MODELS (MONTH)` — empty here ("No data"), normally lists top 5 |
 
 Status bar at the top is always visible (`WIFI ONLINE` / `WIFI OFFLINE` with
 status dot + bridge endpoint), and the onboard RGB LED mirrors connection
@@ -110,20 +111,20 @@ state.
 The four views auto-rotate every 6 seconds (you can also navigate manually
 via the BOOT button — see *Captive portal & button* below):
 
-1. **Costo** — `OGGI $X` (large, green) above a sparkline of the last 7 days,
-   `ieri $Y` line, divider, `MESE $Z`, and `updated Xs ago` footer.
-2. **Finestra 5h** *(the important one)* — current usage of the 5-hour
+1. **Cost** — `$ TODAY $X` (large, green) above a sparkline of the last 7 days,
+   `yesterday $Y` line, divider, `MONTH $Z`, and `upd Xs ago` footer.
+2. **5h window** *(the important one)* — current usage of the 5-hour
    rolling rate-limit window:
    - Big percentage label (green / amber / red at 70 % / 90 % thresholds).
    - `$cost / $plan_limit` and `N msg | out tokens` compact line.
-   - **Two labeled bars**: `Tempo` (violet, 0–300 min elapsed) and `Limite`
+   - **Two labeled bars**: `Time` (violet, 0–300 min elapsed) and `Limit`
      (green→amber→red, 0–100 % of plan limit).
    - **ETA-to-limit** (when burning at non-trivial rate): amber under 60 min,
      red under 30 min. Hidden when the window won't actually hit the cap.
-   - `reset tra Xh Ym` countdown at the bottom.
-3. **Ultimi 7 giorni** — bar chart of daily cost over the past week,
+   - `reset in Xh Ym` countdown at the bottom.
+3. **Last 7 days** — bar chart of daily cost over the past week,
    auto-scaled, today is the rightmost bar.
-4. **Modelli (mese)** — top 5 models for the month with cost and a
+4. **Models (month)** — top 5 models for the month with cost and a
    proportional cyan bar.
 
 The status bar shows a colored dot (green ONLINE / red OFFLINE) + `WIFI`
@@ -156,13 +157,13 @@ Output (write down the **IP** and **token** — you'll paste them into the
 ESP32 setup form):
 
 ```
-Claude Code Usage Bridge avviato
-  ascolta su:   http://0.0.0.0:8787
-  IP locale:    http://192.168.1.42:8787/usage
-  budget mese:  500.00 USD
-  limite 5h:    200.00 USD (max5)
+Claude Code Usage Bridge started
+  listening on: http://0.0.0.0:8787
+  local IP:     http://192.168.1.42:8787/usage
+  month budget: 500.00 USD
+  5h limit:     200.00 USD (max5)
   ...
-  auth:         bearer (token persistito in ~/.claude-code-usage/token)
+  auth:         bearer (token persisted in ~/.claude-code-usage/token)
   token:        aBcDeFgHiJkLmN...rStUvWxYz
   short:        aBcD...wXYz
 ```
@@ -248,7 +249,7 @@ If you left `secrets.h` empty, the device boots into setup mode:
 3. Most OS show a captive-portal notification automatically; otherwise open
    `http://192.168.4.1` in any browser.
 4. Pick your WiFi from the scan dropdown, paste the **bridge IP** and
-   **token** from step 1, hit *Salva e collegati*.
+   **token** from step 1, hit *Save and connect*.
 5. The device reboots, connects, polls the bridge.
 
 To re-enter setup later: **hold BOOT for >5 seconds** while the device is
@@ -272,7 +273,7 @@ each successful poll. Use BOOT button gestures to navigate manually (see
 | `--port`         | `8787`      | TCP port                                             |
 | `--plan`         | `max5`      | `pro` / `max5` / `max20` — sets 5h window limit      |
 | `--plan-limit`   | (from plan) | Override 5h limit in USD                             |
-| `--budget`       | `500`       | Monthly budget in USD (informative, used in mese)    |
+| `--budget`       | `500`       | Monthly budget in USD (informative, used in month view) |
 | `--ttl`          | `2.0`       | In-memory cache TTL in seconds                       |
 | `--token`        | (auto)      | Override bearer token (skip auto-generate/persist)   |
 | `--no-auth`      | off         | Disable auth (warning printed). Don't do this on hostile LANs. |
@@ -494,10 +495,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor guide and
 
 A few ideas the project hasn't tackled yet:
 
-- mDNS discovery so the bridge host can be `claude-bridge.local` instead of an IP.
 - TLS on the bridge (v0.3): self-signed cert + WiFiClientSecure on the ESP32.
 - Weekly limit indicator (Anthropic dashboard exposes both 5h *and* weekly).
-- Port to other ESP32-S3 boards (T-Display-S3, M5StickC, etc).
+- Port to other ESP32-S3 boards (Waveshare ESP32-S3-LCD-1.47, M5StickC, etc).
 - Cost calculation refinement (1h-ephemeral cache pricing, server tool use,
   thinking tokens, ...).
 - BLE-based provisioning as an alternative to softAP captive portal.
