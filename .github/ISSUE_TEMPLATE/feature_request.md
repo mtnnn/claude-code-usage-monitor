@@ -1,21 +1,21 @@
 ---
 name: Feature request
-about: Idea per migliorare il progetto
+about: An idea to improve the project
 labels: enhancement
 ---
 
 ## Use case
 
-<!-- Cosa stai provando a fare? Qual è lo scenario reale? -->
+<!-- What are you trying to do? What is the real-world scenario? -->
 
-## Proposta
+## Proposal
 
-<!-- Cosa vorresti che il progetto facesse -->
+<!-- What would you like the project to do -->
 
-## Alternative considerate
+## Alternatives considered
 
-<!-- Altri modi per risolvere il problema, anche workaround attuali -->
+<!-- Other ways to solve the problem, including current workarounds -->
 
-## Vincoli / contesto
+## Constraints / context
 
-<!-- Hardware diverso? Esigenze particolari? -->
+<!-- Different hardware? Particular needs? -->

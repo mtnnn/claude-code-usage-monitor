@@ -3,11 +3,11 @@
 #include "UsageUI_internal.h"
 #include <Arduino.h>   // millis()
 
-// Core UI: status bar, container dei pannelli, rotazione/navigazione tab,
-// orchestrazione (Init) e dispatch di UsageUI_Update verso i moduli pannello.
-// I 4 pannelli e gli overlay (splash/portal/toast) vivono in UsageUI_*.cpp.
+// Core UI: status bar, panel container, tab rotation/navigation,
+// orchestration (Init) and dispatch of UsageUI_Update to the panel modules.
+// The 4 panels and the overlays (splash/portal/toast) live in UsageUI_*.cpp.
 
-// ----- Stato widget -----
+// ----- Widget state -----
 static lv_obj_t* status_dot;
 static lv_obj_t* status_label;
 static lv_obj_t* status_ip;
@@ -18,7 +18,7 @@ static uint8_t  active_panel = 0;
 static bool     auto_rotate = true;
 static uint32_t rotate_paused_until = 0;
 
-// ----- Costruzione UI -----
+// ----- UI construction -----
 
 static void make_status_bar(lv_obj_t* parent) {
   lv_obj_t* bar = lv_obj_create(parent);
@@ -63,15 +63,15 @@ static lv_obj_t* make_panel(lv_obj_t* parent, lv_color_t bg) {
   return p;
 }
 
-// Helper one-shot per fade-out: nasconde il panel a fine animazione.
-// NB: NON chiamare lv_timer_del nel callback: lv_timer_set_repeat_count(tm, 1)
-// fa già auto-delete dopo la singola esecuzione. Doppio delete = UAF.
+// One-shot fade-out helper: hides the panel when the animation ends.
+// NB: do NOT call lv_timer_del in the callback: lv_timer_set_repeat_count(tm, 1)
+// already auto-deletes after the single run. Double delete = UAF.
 static void hide_after_fade(lv_timer_t* t) {
   lv_obj_t* obj = (lv_obj_t*)t->user_data;
   if (obj) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
 
-// Mostra solo il panel idx, nasconde gli altri con un fade discreto
+// Shows only panel idx, hides the others with a subtle fade
 static void show_panel(uint8_t idx) {
   uint8_t target = idx % 4;
   if (target == active_panel) return;
@@ -89,7 +89,7 @@ static void show_panel(uint8_t idx) {
 static void rotate_timer_cb(lv_timer_t*) {
   if (!auto_rotate) return;
   if (rotate_paused_until && millis() < rotate_paused_until) return;
-  // Non ruotare mentre splash o portal sono visibili
+  // Don't rotate while the splash or portal is visible
   if (ui_splash_blocking() || ui_portal_blocking()) return;
   show_panel(active_panel + 1);
 }
@@ -106,8 +106,8 @@ void UsageUI_SetAutoRotate(bool on) {
   auto_rotate = on;
 }
 
-// Helper usati dal modulo portal: nascondono/ripristinano i 4 pannelli
-// (panels[]/active_panel restano stato del core).
+// Helpers used by the portal module: hide/restore the 4 panels
+// (panels[]/active_panel remain core state).
 void ui_hide_main_panels() {
   for (uint8_t i = 0; i < 4; i++) {
     if (panels[i]) lv_obj_add_flag(panels[i], LV_OBJ_FLAG_HIDDEN);
@@ -137,7 +137,7 @@ void UsageUI_Init() {
   ui_chart_build(panels[2]);
   ui_models_build(panels[3]);
 
-  // primo panel visibile senza fade
+  // first panel visible without fade
   active_panel = 0;
   lv_obj_clear_flag(panels[0], LV_OBJ_FLAG_HIDDEN);
   for (uint8_t i = 1; i < 4; i++) lv_obj_add_flag(panels[i], LV_OBJ_FLAG_HIDDEN);
@@ -158,15 +158,15 @@ void UsageUI_Update(const UsageData& d) {
     lv_label_set_text(status_label, LV_SYMBOL_WIFI " OFFLINE");
   }
 
-  // --- Costo ---
+  // --- Cost ---
   ui_cost_update(d);
 
-  // --- Finestra 5h ---
+  // --- 5h window ---
   ui_window_update(d);
 
-  // --- Grafico 7 giorni ---
+  // --- 7-day chart ---
   ui_chart_update(d);
 
-  // --- Modelli ---
+  // --- Models ---
   ui_models_update(d);
 }

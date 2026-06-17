@@ -1,20 +1,20 @@
 ---
 name: Bug report
-about: Qualcosa non funziona come dovrebbe
+about: Something is not working as it should
 labels: bug
 ---
 
-## Cosa succede
+## What happens
 
-<!-- Descrivi il bug in 1-2 frasi -->
+<!-- Describe the bug in 1-2 sentences -->
 
-## Ambiente
+## Environment
 
-- OS del PC (che fa girare il bridge): <!-- es. Ubuntu 24.04, macOS 15.1, Windows 11 -->
+- PC OS (running the bridge): <!-- e.g. Ubuntu 24.04, macOS 15.1, Windows 11 -->
 - Python: <!-- python3 --version -->
-- Piano Claude: <!-- Pro / Max 5x / Max 20x -->
-- Versione firmware: <!-- v0.2.0 o `git rev-parse --short HEAD` -->
-- Versione bridge: <!-- come sopra -->
+- Claude plan: <!-- Pro / Max 5x / Max 20x -->
+- Firmware version: <!-- v0.2.0 or `git rev-parse --short HEAD` -->
+- Bridge version: <!-- as above -->
 
 ## Steps to reproduce
 
@@ -22,28 +22,28 @@ labels: bug
 2.
 3.
 
-## Cosa mi aspetto
+## What I expect
 
-## Cosa vedo invece
+## What I see instead
 
-## Log
+## Logs
 
 <details><summary>Bridge stdout</summary>
 
 ```
-<incolla output bridge.py>
+<paste bridge.py output>
 ```
 
 </details>
 
-<details><summary>Serial monitor ESP32 (115200 baud)</summary>
+<details><summary>ESP32 serial monitor (115200 baud)</summary>
 
 ```
-<incolla output seriale dell'ESP32>
+<paste the ESP32 serial output>
 ```
 
 </details>
 
-## Note aggiuntive
+## Additional notes
 
-<!-- screenshot del display, foto della board, qualunque cosa aiuti -->
+<!-- screenshot of the display, photo of the board, anything that helps -->

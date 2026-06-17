@@ -1,64 +1,87 @@
 # Claude Code Usage Bridge
 
-Server HTTP locale (Python 3.10+, zero dipendenze) che legge i transcript JSONL di
-Claude Code in `~/.claude/projects/` e li espone come JSON per il firmware
-ESP32-S3-LCD-1.47 (`../firmware`).
+Local HTTP server (Python 3.10+, zero dependencies) that reads the JSONL transcripts of
+Claude Code in `~/.claude/projects/` and exposes them as JSON for the
+ESP32-S3-LCD-1.47 firmware (`../firmware`).
 
-## Avvio
+## Startup
 
 ```bash
 python3 bridge.py
-# avvio con porta/budget custom:
+# start with a custom port/budget:
 python3 bridge.py --port 9000 --budget 200
 ```
 
-Output atteso (v0.2+):
+Expected output (v0.2+):
 
 ```
-Claude Code Usage Bridge avviato
-  ascolta su:   http://0.0.0.0:8787
-  IP locale:    http://192.168.x.x:8787/usage
-  budget mese:  500.00 USD
-  limite 5h:    200.00 USD (max5)
+Claude Code Usage Bridge started
+  listening on: http://0.0.0.0:8787
+  local IP:     http://192.168.x.x:8787/usage
+  month budget: 500.00 USD
+  5h limit:     200.00 USD (max5)
   ...
-  auth:         bearer (token persistito in /home/you/.claude-code-usage/token)
+  auth:         bearer (token persisted in /home/you/.claude-code-usage/token)
   token:        aBcDeFgHiJ...xyz
   short:        aBcD...8XYz
 
-Su ESP32, in secrets.h (o nel captive portal) imposta:
+On the ESP32, in secrets.h (or in the captive portal) set:
     #define BRIDGE_HOST   "192.168.x.x"
     #define BRIDGE_PORT   8787
     #define BRIDGE_TOKEN  "aBcDeFgHiJ...xyz"
 ```
 
-## Autenticazione (v0.2+)
+## Authentication (v0.2+)
 
-Dalla v0.2 il bridge richiede un **bearer token** su `/usage` e `/metrics`:
+From v0.2 onward the bridge requires a **bearer token** on `/usage` and `/metrics`:
 
-- Al primo avvio viene generato e salvato in `~/.claude-code-usage/token`
-  (permessi `0600`, directory `0700`).
-- Le run successive caricano lo stesso token.
-- Puoi forzare un token esplicito con `--token <valore>` (es. per ambienti dove
-  vuoi tu il controllo).
-- Puoi disabilitare l'auth con `--no-auth` (sconsigliato: stampa un warning, e
-  chiunque sulla LAN può leggere il consumo).
-- `/health` resta sempre anonimo (utile come liveness probe).
+- On first startup it is generated and saved in `~/.claude-code-usage/token`
+  (permissions `0600`, directory `0700`).
+- Subsequent runs load the same token.
+- You can force an explicit token with `--token <value>` (e.g. for environments where
+  you want control yourself).
+- You can disable auth with `--no-auth` (not recommended: it prints a warning, and
+  anyone on the LAN can read your usage).
+- `/health` always stays anonymous (useful as a liveness probe).
 
-## Verifica
+## Verification
 
 ```bash
-# Token corrente
+# Current token
 TOK=$(cat ~/.claude-code-usage/token)
 
-# Test endpoint
+# Test endpoints
 curl -H "Authorization: Bearer $TOK" http://localhost:8787/usage | python3 -m json.tool
 curl http://localhost:8787/health
 curl -H "Authorization: Bearer $TOK" http://localhost:8787/metrics
 ```
 
-## Endpoint `/metrics` (Prometheus)
+## Automatic device re-pointing (announcement)
 
-Espone in formato testo Prometheus 0.0.4:
+The device always pulls `/usage` — but when the laptop's IP changes,
+instead of re-entering the captive portal to re-enter it, the **bridge** is the one to
+re-point the device. By default (`--announce` active) the bridge:
+
+1. resolves **`claudemonitor.local`** (Bonjour on macOS, avahi on Linux; fallback
+   `--device-ip <ip>` if mDNS is not available);
+2. `POST`s its own IP to the device's control endpoint (port 80),
+   authenticating with the same bearer token;
+3. repeats every `--announce-interval` seconds, recomputing the local IP — so a
+   network change mid-session is propagated on its own.
+
+```bash
+python3 bridge.py                      # announcement active by default
+python3 bridge.py --no-announce        # disable the announcement
+python3 bridge.py --device-ip 192.168.1.78   # fallback if .local does not resolve
+python3 bridge.py --announce-once      # announce once and exit (test)
+```
+
+Stdlib only (`urllib` + `socket.getaddrinfo`): no added dependencies. Alternatively,
+you can re-point manually from `http://claudemonitor.local/` in the browser.
+
+## `/metrics` endpoint (Prometheus)
+
+Exposes in Prometheus 0.0.4 text format:
 
 ```
 cc_cost_today_usd       <float>
@@ -68,25 +91,31 @@ cc_window5h_cost_usd    <float>
 cc_messages_total       <int>
 ```
 
-Per scraping anonimo da Prometheus/Grafana: avvia il bridge con `--metrics-anon`
-(in questo caso solo `/metrics` resta anonimo; `/usage` continua a richiedere token).
+For anonymous scraping from Prometheus/Grafana: start the bridge with `--metrics-anon`
+(in this case only `/metrics` stays anonymous; `/usage` still requires a token).
 
-## Flag CLI
+## CLI flags
 
-| Flag | Default | Descrizione |
+| Flag | Default | Description |
 |---|---|---|
 | `--host` | `0.0.0.0` | Bind address |
-| `--port` | `8787` | Porta TCP |
-| `--budget` | `500.0` | Budget mensile USD (informativo) |
-| `--plan` | `max5` | Preset limite 5h: `pro`/`max5`/`max20` |
-| `--plan-limit` | (preset) | Override esplicito limite 5h USD |
-| `--ttl` | `2.0` | Cache TTL secondi |
-| `--token` | (auto) | Token esplicito (skip persistenza) |
-| `--no-auth` | off | Disabilita auth (sconsigliato) |
-| `--metrics-anon` | off | Espone `/metrics` senza token |
-| `--rescan-all` | off | Rilegge tutti i transcript ogni volta (vedi nota sotto) |
+| `--port` | `8787` | TCP port |
+| `--budget` | `500.0` | Monthly budget USD (informational) |
+| `--plan` | `max5` | 5h limit preset: `pro`/`max5`/`max20` |
+| `--plan-limit` | (preset) | Explicit override of the 5h limit USD |
+| `--ttl` | `2.0` | Cache TTL seconds |
+| `--token` | (auto) | Explicit token (skip persistence) |
+| `--no-auth` | off | Disable auth (not recommended) |
+| `--metrics-anon` | off | Expose `/metrics` without a token |
+| `--rescan-all` | off | Re-reads all transcripts every time (see note below) |
+| `--announce` / `--no-announce` | on | Announce the bridge's IP to the device via `claudemonitor.local` |
+| `--device-name` | `claudemonitor.local` | mDNS hostname of the device to re-point |
+| `--device-ip` | (auto) | Device IP as a fallback if mDNS does not resolve |
+| `--device-control-port` | `80` | Port of the control endpoint on the device |
+| `--announce-interval` | `30.0` | Seconds between one announcement and the next |
+| `--announce-once` | off | Announce once and terminate (useful for testing) |
 
-## Schema risposta `/usage`
+## `/usage` response schema
 
 ```json
 {
@@ -115,15 +144,15 @@ Per scraping anonimo da Prometheus/Grafana: avvia il bridge con `--metrics-anon`
 }
 ```
 
-`last7` ha sempre 7 entries (oggi è l'ultima); `by_model` è ordinato per costo decrescente.
+`last7` always has 7 entries (today is the last one); `by_model` is sorted by descending cost.
 
-## Personalizzare i prezzi
+## Customizing the prices
 
-Modifica `pricing.json` (USD per 1 milione di token). I modelli sono matchati per
-prefisso, quindi `claude-opus-4-7-20251201` ricade su `claude-opus-4-7`. La chiave
-`_default` viene usata per modelli ignoti.
+Edit `pricing.json` (USD per 1 million tokens). Models are matched by
+prefix, so `claude-opus-4-7-20251201` falls back on `claude-opus-4-7`. The
+`_default` key is used for unknown models.
 
-## Avvio automatico (Linux, systemd user)
+## Automatic startup (Linux, systemd user)
 
 ```ini
 # ~/.config/systemd/user/claude-bridge.service
@@ -142,13 +171,13 @@ WantedBy=default.target
 systemctl --user enable --now claude-bridge.service
 ```
 
-## Note
+## Notes
 
-- I JSONL sono letti read-only ad ogni richiesta (con cache TTL 2s in RAM per non
-  rileggere migliaia di righe ad ogni poll dell'ESP32).
-- Per non riscansionare tutta la storia a ogni refresh, i file il cui `mtime` è
-  troppo vecchio per contribuire a una vista (mese / 7 giorni / finestra 5h)
-  vengono saltati. Se ripristini transcript da backup con `mtime` datato ma
-  contenuto recente, avvia con `--rescan-all` per forzare lo scan completo.
-- Funziona anche se Claude Code non è in esecuzione: i transcript restano su disco.
-- Non viene esposto nessun dato sensibile dei prompt — solo aggregati di costo/token.
+- The JSONL files are read read-only on every request (with a 2s TTL cache in RAM so as not to
+  re-read thousands of lines on every poll from the ESP32).
+- To avoid rescanning the whole history on every refresh, files whose `mtime` is
+  too old to contribute to a view (month / 7 days / 5h window)
+  are skipped. If you restore transcripts from a backup with a dated `mtime` but
+  recent content, start with `--rescan-all` to force a full scan.
+- It works even if Claude Code is not running: the transcripts stay on disk.
+- No sensitive prompt data is exposed — only cost/token aggregates.

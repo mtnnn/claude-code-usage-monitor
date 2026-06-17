@@ -1,7 +1,7 @@
 #include "UsageUI.h"
 #include "UsageUI_internal.h"
 
-// Tab 2: GRAFICO 7 GIORNI — bar chart con etichette giorno e "max $X".
+// Tab 2: LAST 7 DAYS CHART — bar chart with day labels and "max $X".
 static lv_obj_t* chart;
 static lv_chart_series_t* chart_series;
 static lv_obj_t* chart_day_lbls[7];
@@ -9,7 +9,7 @@ static lv_obj_t* chart_max_lbl;
 
 void ui_chart_build(lv_obj_t* p) {
   lv_obj_t* hdr = lv_label_create(p);
-  lv_label_set_text(hdr, LV_SYMBOL_LIST " ULTIMI 7 GIORNI");
+  lv_label_set_text(hdr, LV_SYMBOL_LIST " LAST 7 DAYS");
   lv_obj_set_style_text_color(hdr, COL_FG_DIM, LV_PART_MAIN);
   lv_obj_set_style_text_font(hdr, FONT_SMALL, LV_PART_MAIN);
   lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 4);
@@ -31,7 +31,7 @@ void ui_chart_build(lv_obj_t* p) {
   lv_obj_set_style_border_width(chart, 0, LV_PART_MAIN);
   chart_series = lv_chart_add_series(chart, COL_ACCENT_COST, LV_CHART_AXIS_PRIMARY_Y);
 
-  // Labels giorno sotto le barre
+  // Day labels under the bars
   int chart_left = 8;
   int chart_w    = PANEL_W - 16;
   int chart_bottom = 40 + (PANEL_H - 70);

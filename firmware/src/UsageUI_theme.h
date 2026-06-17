@@ -2,11 +2,11 @@
 #include <lvgl.h>
 #include "Display_ST7789.h"
 
-// Tema condiviso dell'UI (colori, font, layout). Una sola fonte di verità,
-// inclusa da tutti i moduli UsageUI_*.cpp.
+// Shared UI theme (colors, fonts, layout). A single source of truth,
+// included by all UsageUI_*.cpp modules.
 
 // ===== v0.2 palette =====
-// Una sola fonte di verità per i colori; il codice sotto usa solo questi macro.
+// A single source of truth for the colors; the code below uses only these macros.
 #define COL_BG           lv_color_hex(0x0b0d10)
 #define COL_BG_PANEL     lv_color_hex(0x14181d)
 #define COL_BG_STATUS    lv_color_hex(0x101820)
@@ -16,13 +16,13 @@
 #define COL_FG_MUTED     lv_color_hex(0x666666)
 #define COL_DIVIDER      lv_color_hex(0x444444)
 #define COL_BAR_BG       lv_color_hex(0x4c5159)
-#define COL_ACCENT_COST  lv_color_hex(0x35d399)   // verde — costo/money
-#define COL_ACCENT_TOK   lv_color_hex(0x38bdf8)   // ciano — token
-#define COL_WARN         lv_color_hex(0xfbbf24)   // ambra — 70%+ / ETA medio
-#define COL_DANGER       lv_color_hex(0xef4444)   // rosso — 90%+ / ETA <30
-#define COL_TIME         lv_color_hex(0xa78bfa)   // viola — barra tempo
+#define COL_ACCENT_COST  lv_color_hex(0xd97757)   // Claude coral/orange — cost/money
+#define COL_ACCENT_TOK   lv_color_hex(0x38bdf8)   // cyan — tokens
+#define COL_WARN         lv_color_hex(0xfbbf24)   // amber — 70%+ / medium ETA
+#define COL_DANGER       lv_color_hex(0xef4444)   // red — 90%+ / ETA <30
+#define COL_TIME         lv_color_hex(0xa78bfa)   // purple — time bar
 
-// ----- Font: usa quelli opzionali se abilitati in lv_conf.h, altrimenti fallback -----
+// ----- Font: use the optional ones if enabled in lv_conf.h, otherwise fall back -----
 #if LV_FONT_MONTSERRAT_32
   #define FONT_HUGE   &lv_font_montserrat_32
 #elif LV_FONT_MONTSERRAT_28
@@ -48,8 +48,8 @@
 #define FONT_TINY   &lv_font_montserrat_12
 
 #define STATUS_H 18
-#define SCREEN_W LCD_WIDTH    // 172
-#define SCREEN_H LCD_HEIGHT   // 320
+#define SCREEN_W LCD_WIDTH    // 320 (landscape)
+#define SCREEN_H LCD_HEIGHT   // 170 (landscape)
 #define PANEL_W  SCREEN_W
 #define PANEL_H  (SCREEN_H - STATUS_H)
 

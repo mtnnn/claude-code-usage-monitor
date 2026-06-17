@@ -63,7 +63,7 @@ static const char* PORTAL_HTML_HEAD = R"HTML(<!doctype html>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
          max-width: 480px; margin: 1rem auto; padding: 0 1rem;
          background: #0b0d10; color: #e6e6e6; }
-  h1 { font-size: 1.25rem; color: #35d399; margin: 0.5rem 0; }
+  h1 { font-size: 1.25rem; color: #d97757; margin: 0.5rem 0; }
   .ver { color: #8a8f96; font-size: 0.8rem; margin-bottom: 1rem; }
   label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.9rem; color: #8a8f96; }
   input, select { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box;
@@ -72,31 +72,31 @@ static const char* PORTAL_HTML_HEAD = R"HTML(<!doctype html>
   input:focus, select:focus { outline: none; border-color: #38bdf8; }
   small { color: #666; font-size: 0.75rem; }
   button { width: 100%; padding: 0.75rem; font-size: 1rem; margin-top: 1rem;
-           background: #35d399; color: #0b0d10; border: none; border-radius: 4px;
+           background: #d97757; color: #0b0d10; border: none; border-radius: 4px;
            font-weight: 600; cursor: pointer; }
-  button:hover { background: #4ade80; }
+  button:hover { background: #e8916f; }
   .row { display: flex; gap: 0.5rem; }
   .row > * { flex: 1; }
   .hint { color: #8a8f96; font-size: 0.85rem; margin: 0.5rem 0 1rem; }
 </style></head><body>
 <h1>Claude Code Usage Monitor</h1>
 <div class="ver">v0.2.0 — Setup</div>
-<div class="hint">Configura WiFi e bridge. Il device farà reboot in modalità normale.</div>
+<div class="hint">Configure WiFi and bridge. The device will reboot in normal mode.</div>
 <form action="/save" method="POST">
 )HTML";
 
 static const char* PORTAL_HTML_TAIL = R"HTML(
-  <button type="submit">Salva e collegati</button>
+  <button type="submit">Save and connect</button>
 </form>
 <div class="hint" style="margin-top:1rem">
-  Il token lo trovi nel terminale dove gira <code>bridge.py</code>
-  (riga <code>token: ...</code>). Avvia il bridge prima di salvare.
+  Find the token in the terminal running <code>bridge.py</code>
+  (line <code>token: ...</code>). Start the bridge before saving.
 </div>
 <script>
   fetch('/scan').then(r => r.json()).then(nets => {
     const sel = document.getElementById('ssidSel');
     if (!sel) return;
-    sel.innerHTML = '<option value="">— scegli rete —</option>';
+    sel.innerHTML = '<option value="">— choose network —</option>';
     nets.sort((a,b) => b.rssi - a.rssi).forEach(n => {
       const o = document.createElement('option');
       o.value = n.ssid;
@@ -110,25 +110,25 @@ static const char* PORTAL_HTML_TAIL = R"HTML(
 static void handle_root() {
   const AppConfig& c = Config::get();
   String body = PORTAL_HTML_HEAD;
-  body += "<label>Rete WiFi (auto-scan)</label>";
-  body += "<select id='ssidSel' name='ssid'><option value=''>— scansiono... —</option></select>";
-  body += "<label>SSID manuale (se non in lista)</label>";
-  body += "<input name='ssid_manual' placeholder='nome rete' value='" + escape_html(c.wifi_ssid) + "'>";
-  body += "<label>Password WiFi</label>";
+  body += "<label>WiFi network (auto-scan)</label>";
+  body += "<select id='ssidSel' name='ssid'><option value=''>— scanning... —</option></select>";
+  body += "<label>Manual SSID (if not listed)</label>";
+  body += "<input name='ssid_manual' placeholder='network name' value='" + escape_html(c.wifi_ssid) + "'>";
+  body += "<label>WiFi password</label>";
   body += "<input type='password' name='pass'>";
 
   body += "<div class='row'>";
   body += "<div><label>Bridge host</label>";
   body += "<input name='host' required value='" + escape_html(c.bridge_host) + "'></div>";
-  body += "<div><label>Porta</label>";
+  body += "<div><label>Port</label>";
   body += "<input type='number' name='port' min='1' max='65535' value='" + String(c.bridge_port) + "'></div>";
   body += "</div>";
 
-  body += "<label>Bridge token <small>(da bridge.py)</small></label>";
-  // Il token NON viene ripopolato: e' un segreto e non va riflesso nel form.
-  // Se l'utente lascia vuoto al salvataggio, handle_save preserva quello esistente.
+  body += "<label>Bridge token <small>(from bridge.py)</small></label>";
+  // The token is NOT repopulated: it's a secret and must not be reflected in the form.
+  // If the user leaves it blank on save, handle_save preserves the existing one.
   body += "<input type='password' name='token' placeholder='"
-          + String(c.bridge_token.length() ? "(invariato se lasci vuoto)" : "incolla il token")
+          + String(c.bridge_token.length() ? "(unchanged if left blank)" : "paste the token")
           + "'>";
 
   body += "<label>Polling (ms) — min 1000, max 60000</label>";
@@ -167,17 +167,17 @@ static void handle_save() {
   String pass  = s_web.arg("pass");
   String host  = s_web.arg("host");   host.trim();
   String token = s_web.arg("token");  token.trim();
-  // Token vuoto = "invariato": preserva quello gia' salvato (non lo
-  // ripopoliamo nel form, quindi un re-save per cambiare solo il WiFi non
-  // deve cancellarlo).
+  // Empty token = "unchanged": preserve the one already saved (we don't
+  // repopulate it in the form, so a re-save to change only the WiFi must
+  // not erase it).
   if (token.length() == 0) token = Config::get().bridge_token;
   long   port_l = s_web.arg("port").toInt();
   long   poll_l = s_web.arg("poll").toInt();
 
   if (ssid.length() == 0 || host.length() == 0) {
     s_web.send(400, "text/html",
-               "<h2>SSID e Bridge host sono obbligatori.</h2>"
-               "<a href='/'>Torna al form</a>");
+               "<h2>SSID and Bridge host are required.</h2>"
+               "<a href='/'>Back to form</a>");
     return;
   }
   uint16_t port = (port_l > 0 && port_l < 65536) ? (uint16_t)port_l : 8787;
@@ -190,13 +190,13 @@ static void handle_save() {
 
   String body =
     "<!doctype html><html><head><meta charset='utf-8'>"
-    "<title>Salvato</title>"
+    "<title>Saved</title>"
     "<style>body{font-family:sans-serif;background:#0b0d10;color:#e6e6e6;"
-    "max-width:480px;margin:2rem auto;padding:0 1rem;}h2{color:#35d399;}</style>"
-    "</head><body><h2>Salvato &mdash; reboot in corso</h2>"
-    "<p>La board uscirà dalla modalità AP e si collegherà alla tua rete.</p>"
-    "<p>Se il display non raggiunge il bridge entro 60 secondi, tieni premuto "
-    "BOOT per &gt;5 secondi per rientrare in setup.</p>"
+    "max-width:480px;margin:2rem auto;padding:0 1rem;}h2{color:#d97757;}</style>"
+    "</head><body><h2>Saved &mdash; rebooting</h2>"
+    "<p>The board will leave AP mode and connect to your network.</p>"
+    "<p>If the display can't reach the bridge within 60 seconds, hold "
+    "BOOT for &gt;5 seconds to re-enter setup.</p>"
     "</body></html>";
   s_web.send(200, "text/html; charset=utf-8", body);
   s_web.client().flush();
@@ -204,7 +204,7 @@ static void handle_save() {
   ESP.restart();
 }
 
-// Catch-all: redirect a "/" per attivare la captive notification su OS moderni
+// Catch-all: redirect to "/" to trigger the captive notification on modern OSes
 // (iOS captive.apple.com, Android generate_204, Windows connecttest.txt).
 static void handle_captive() {
   String loc = "http://" + s_ap_ip + "/";
@@ -215,22 +215,22 @@ static void handle_captive() {
 // ===== Public API =====
 
 void Portal::start() {
-  // Disconnetti eventuale STA in corso (se entriamo in portal mid-run dopo
-  // un fallimento WiFi persistente) e libera la radio per lo scan.
+  // Disconnect any STA in progress (if we enter the portal mid-run after
+  // a persistent WiFi failure) and free the radio for the scan.
   WiFi.disconnect(true, true);
-  // AP_STA, non WIFI_AP: in pure AP mode `WiFi.scanNetworks()` ritorna 0
-  // (la radio STA è disattivata). Con AP_STA softAP funziona e lo scan
-  // resta possibile dall'interfaccia STA.
+  // AP_STA, not WIFI_AP: in pure AP mode `WiFi.scanNetworks()` returns 0
+  // (the STA radio is disabled). With AP_STA softAP works and the scan
+  // stays possible from the STA interface.
   WiFi.mode(WIFI_AP_STA);
   uint8_t mac[6]; WiFi.macAddress(mac);
   char ap[24];
   snprintf(ap, sizeof(ap), "ClaudeMonitor-%02X%02X", mac[4], mac[5]);
   s_ap_name = ap;
 
-  // Password WPA2 casuale (RNG hardware), mostrata sul display durante il
-  // setup. NON derivata dal MAC: il BSSID viaggia in chiaro nei beacon e il
-  // firmware e' open-source, quindi una derivazione dal MAC sarebbe
-  // ricostruibile da un attaccante. Una pwd casuale per-sessione no.
+  // Random WPA2 password (hardware RNG), shown on the display during
+  // setup. NOT derived from the MAC: the BSSID travels in clear text in the beacons and the
+  // firmware is open-source, so a derivation from the MAC would be
+  // reconstructable by an attacker. A random per-session password is not.
   static const char PW_ALPHABET[] = "abcdefghjkmnpqrstuvwxyz23456789";
   const size_t alpha_n = sizeof(PW_ALPHABET) - 1;
   char pw[9];
@@ -241,7 +241,7 @@ void Portal::start() {
   WiFi.softAP(ap, pw);
   s_ap_ip = WiFi.softAPIP().toString();
 
-  // Catch-all DNS → l'IP dell'AP
+  // Catch-all DNS → the AP's IP
   s_dns.setErrorReplyCode(DNSReplyCode::NoError);
   s_dns.start(53, "*", WiFi.softAPIP());
 
@@ -252,7 +252,7 @@ void Portal::start() {
   s_web.begin();
 
   s_running = true;
-  Serial.printf("[Portal] AP=%s pass=%s IP=%s — apri http://%s\n",
+  Serial.printf("[Portal] AP=%s pass=%s IP=%s — open http://%s\n",
                 ap, pw, s_ap_ip.c_str(), s_ap_ip.c_str());
 }
 

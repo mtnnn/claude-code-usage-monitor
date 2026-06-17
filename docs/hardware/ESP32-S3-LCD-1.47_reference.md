@@ -1,79 +1,79 @@
-# ESP32-S3-LCD-1.47 - Documentazione Hardware di Riferimento
+# ESP32-S3-LCD-1.47 - Hardware Reference Documentation
 
-Fonte: https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47
-
----
-
-## 1. Panoramica
-
-Board di sviluppo basata su ESP32-S3 con display LCD TFT da 1.47 pollici integrato,
-slot per TF card e LED RGB. Connettivita WiFi e Bluetooth 5 con antenna ceramica onboard.
+Source: https://www.waveshare.com/wiki/ESP32-S3-LCD-1.47
 
 ---
 
-## 2. Specifiche Processore e Memoria
+## 1. Overview
 
-| Parametro        | Valore                                    |
+Development board based on the ESP32-S3 with an integrated 1.47-inch TFT LCD display,
+a TF card slot and an RGB LED. WiFi and Bluetooth 5 connectivity with an onboard ceramic antenna.
+
+---
+
+## 2. Processor and Memory Specifications
+
+| Parameter        | Value                                     |
 |------------------|-------------------------------------------|
 | SoC              | ESP32-S3R8                                |
-| Architettura     | Xtensa 32-bit LX7 dual-core              |
-| Frequenza max    | 240 MHz                                   |
+| Architecture     | Xtensa 32-bit LX7 dual-core              |
+| Max frequency    | 240 MHz                                   |
 | SRAM             | 512 KB                                    |
 | ROM              | 384 KB                                    |
 | PSRAM            | 8 MB                                      |
 | Flash            | 16 MB                                     |
-| USB              | Full-speed USB serial integrato           |
+| USB              | Integrated full-speed USB serial          |
 
 ---
 
-## 3. Display LCD
+## 3. LCD Display
 
-| Parametro        | Valore                                    |
+| Parameter        | Value                                     |
 |------------------|-------------------------------------------|
-| Dimensione       | 1.47 pollici TFT                          |
-| Risoluzione      | 172 x 320 pixel                           |
-| Colori           | 262K (18-bit)                             |
+| Size             | 1.47 inch TFT                             |
+| Resolution       | 172 x 320 pixel                           |
+| Colors           | 262K (18-bit)                             |
 | Controller       | ST7789                                    |
-| Interfaccia      | SPI                                       |
+| Interface        | SPI                                       |
 
 ---
 
-## 4. Connettivita Wireless
+## 4. Wireless Connectivity
 
-| Parametro        | Valore                                    |
+| Parameter        | Value                                     |
 |------------------|-------------------------------------------|
 | WiFi             | 2.4 GHz, 802.11 b/g/n                    |
 | Bluetooth        | Bluetooth 5 (BLE)                         |
-| Antenna          | Patch ceramica onboard                    |
+| Antenna          | Onboard ceramic patch                     |
 
 ---
 
-## 5. Alimentazione
+## 5. Power
 
-| Parametro        | Valore                                    |
+| Parameter        | Value                                     |
 |------------------|-------------------------------------------|
-| Regolatore LDO   | ME6217C33M5G                              |
-| Corrente max     | 800 mA                                    |
-| Connettore       | USB Type-A                                |
+| LDO regulator    | ME6217C33M5G                              |
+| Max current      | 800 mA                                    |
+| Connector        | USB Type-A                                |
 
 ---
 
-## 6. Pinout GPIO - Mappatura Completa
+## 6. GPIO Pinout - Complete Mapping
 
-### 6.1 Display LCD (SPI)
+### 6.1 LCD Display (SPI)
 
-| Segnale          | GPIO | Descrizione                          |
+| Signal           | GPIO | Description                          |
 |------------------|------|--------------------------------------|
-| MOSI             | 45   | Master Out Slave In (dati SPI)       |
-| SCLK             | 40   | Serial Clock (clock SPI)             |
-| CS               | 42   | Chip Select (selezione chip)         |
-| DC               | 41   | Data/Command (selezione dati/cmd)    |
-| RST              | 39   | Reset display                        |
-| BL               | 48   | Backlight (retroilluminazione)       |
+| MOSI             | 45   | Master Out Slave In (SPI data)       |
+| SCLK             | 40   | Serial Clock (SPI clock)             |
+| CS               | 42   | Chip Select                          |
+| DC               | 41   | Data/Command (data/cmd select)       |
+| RST              | 39   | Display reset                        |
+| BL               | 48   | Backlight                            |
 
 ### 6.2 TF Card (SD/MMC)
 
-| Segnale          | GPIO | Descrizione                          |
+| Signal           | GPIO | Description                          |
 |------------------|------|--------------------------------------|
 | CMD              | 15   | Command line                         |
 | SCK              | 14   | Clock                                |
@@ -82,77 +82,77 @@ slot per TF card e LED RGB. Connettivita WiFi e Bluetooth 5 con antenna ceramica
 | D2               | 17   | Data 2                               |
 | D3               | 21   | Data 3                               |
 
-### 6.3 Periferiche Onboard
+### 6.3 Onboard Peripherals
 
-| Componente       | GPIO | Descrizione                          |
+| Component        | GPIO | Description                          |
 |------------------|------|--------------------------------------|
-| RGB LED          | 38   | LED RGB controllabile (WS2812-like)  |
+| RGB LED          | 38   | Controllable RGB LED (WS2812-like)   |
 
 ---
 
-## 7. Ambiente di Sviluppo
+## 7. Development Environment
 
-### 7.1 Framework Supportati
+### 7.1 Supported Frameworks
 
-- **Arduino IDE** - richiede pacchetto `esp32 by Espressif Systems >= 3.0.2`
-- **ESP-IDF** - tramite VSCode con plugin Espressif
+- **Arduino IDE** - requires the package `esp32 by Espressif Systems >= 3.0.2`
+- **ESP-IDF** - via VSCode with the Espressif plugin
 
-### 7.2 Librerie Richieste (installazione offline)
+### 7.2 Required Libraries (offline installation)
 
-| Libreria         | Versione | Utilizzo                             |
+| Library          | Version  | Use                                  |
 |------------------|----------|--------------------------------------|
-| LVGL             | 8.3.10   | Libreria grafica per UI              |
-| PNGdec           | 1.0.2    | Decodifica immagini PNG              |
+| LVGL             | 8.3.10   | Graphics library for UI              |
+| PNGdec           | 1.0.2    | PNG image decoding                   |
 
-### 7.3 Tool di Programmazione
+### 7.3 Programming Tools
 
 - Flash Download Tool v3.9.5_0
-- Supporto camera OV2640/OV5640 (opzionale)
+- OV2640/OV5640 camera support (optional)
 
 ---
 
-## 8. Procedura di Download/Flash
+## 8. Download/Flash Procedure
 
-### Modalita Download (se il flash fallisce):
+### Download Mode (if the flash fails):
 
-1. Tenere premuto il pulsante **BOOT**
-2. Premere contemporaneamente **RESET**
-3. Rilasciare **RESET**
-4. Rilasciare **BOOT**
-5. Il dispositivo entra in modalita download
+1. Hold down the **BOOT** button
+2. Simultaneously press **RESET**
+3. Release **RESET**
+4. Release **BOOT**
+5. The device enters download mode
 
-### Output USB:
+### USB Output:
 
-- Abilitare `USB CDC On Boot` nelle impostazioni della board
-- Oppure dichiarare `HWCDC` nel codice per output diretto via USB
+- Enable `USB CDC On Boot` in the board settings
+- Or declare `HWCDC` in the code for direct output via USB
 
 ---
 
-## 9. Demo Disponibili (riferimento)
+## 9. Available Demos (reference)
 
-| Demo                        | Descrizione                                    |
+| Demo                        | Description                                    |
 |-----------------------------|------------------------------------------------|
-| LVGL_Arduino                | Test funzionalita dispositivo con LVGL         |
-| LCD_Image                   | Visualizzazione immagini PNG da TF card        |
-| ESP32-S3-LCD-1.47-Test      | Test completo di tutte le periferiche          |
+| LVGL_Arduino                | Device functionality test with LVGL            |
+| LCD_Image                   | Displaying PNG images from a TF card           |
+| ESP32-S3-LCD-1.47-Test      | Full test of all peripherals                   |
 
 ---
 
-## 10. Risorse e Datasheet
+## 10. Resources and Datasheets
 
 - ESP32-S3 Technical Reference Manual (Espressif)
-- Datasheet LCD 1.47" (ST7789)
-- Schema elettrico ESP32-S3-LCD-1.47 (Waveshare)
+- LCD 1.47" Datasheet (ST7789)
+- ESP32-S3-LCD-1.47 schematic (Waveshare)
 - Demo code: ESP32-S3-LCD-1.47-Demo.zip
 
 ---
 
-## 11. Note per Firmware Custom
+## 11. Notes for Custom Firmware
 
-### Configurazione SPI per LCD ST7789
+### SPI Configuration for the ST7789 LCD
 
 ```c
-// Pin definitions per il nostro firmware
+// Pin definitions for our firmware
 #define LCD_MOSI    45
 #define LCD_SCLK    40
 #define LCD_CS      42
@@ -163,13 +163,13 @@ slot per TF card e LED RGB. Connettivita WiFi e Bluetooth 5 con antenna ceramica
 // Display parameters
 #define LCD_WIDTH   172
 #define LCD_HEIGHT  320
-#define LCD_COLOR_DEPTH  16  // RGB565 tipicamente usato
+#define LCD_COLOR_DEPTH  16  // RGB565 typically used
 ```
 
-### Configurazione SD Card
+### SD Card Configuration
 
 ```c
-// SD Card pin definitions (modalita SD/MMC 4-bit)
+// SD Card pin definitions (4-bit SD/MMC mode)
 #define SD_CMD      15
 #define SD_CLK      14
 #define SD_D0       16

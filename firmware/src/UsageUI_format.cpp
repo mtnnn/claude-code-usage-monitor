@@ -15,17 +15,17 @@ void ui_fmt_tokens(char* dst, size_t cap, uint64_t v) {
   else                          snprintf(dst, cap, "%.2fB", v / 1000000000.0);
 }
 
-// estrae sigla modello: "claude-opus-4-7" -> "Opus 4.7"
+// extracts a short model name: "claude-opus-4-7" -> "Opus 4.7"
 void ui_short_model_name(const char* full, char* dst, size_t cap) {
   if (!full || !*full) { snprintf(dst, cap, "?"); return; }
-  // cerca opus/sonnet/haiku
+  // look for opus/sonnet/haiku
   const char* fam = nullptr;
   if (strstr(full, "opus"))   fam = "Opus";
   else if (strstr(full, "sonnet")) fam = "Sonnet";
   else if (strstr(full, "haiku"))  fam = "Haiku";
   else { snprintf(dst, cap, "%s", full); return; }
 
-  // estrai prima coppia di numeri "4-7" -> "4.7"
+  // extract the first number pair "4-7" -> "4.7"
   int maj = 0, min = -1;
   const char* p = full;
   while (*p) {

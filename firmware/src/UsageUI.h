@@ -2,41 +2,41 @@
 #include <lvgl.h>
 #include "UsageClient.h"
 
-// Costruisce l'interfaccia LVGL sulla schermata attiva. Va chiamata dopo Lvgl_Init().
+// Builds the LVGL interface on the active screen. Must be called after Lvgl_Init().
 void UsageUI_Init();
 
-// Aggiorna i widget con uno snapshot. Va chiamata frequentemente (ad es. ogni 500 ms).
-// Sicura da chiamare dal main loop dove gira lv_timer_handler().
+// Updates the widgets with a snapshot. Should be called frequently (e.g. every 500 ms).
+// Safe to call from the main loop where lv_timer_handler() runs.
 void UsageUI_Update(const UsageData& d);
 
-// Aggiorna il testo IP nella status bar.
+// Updates the IP text in the status bar.
 void UsageUI_SetIp(const char* ip);
 
-// ===== Splash di boot (overlay sopra l'UI principale) =====
-// UsageUI_Splash crea l'overlay. UsageUI_SplashSetState aggiorna la riga di stato
-// in basso ("Connessione WiFi...", "Lettura bridge..."). UsageUI_DismissSplash
-// fa fade-out e cancella l'overlay; idempotente.
+// ===== Boot splash (overlay above the main UI) =====
+// UsageUI_Splash creates the overlay. UsageUI_SplashSetState updates the status line
+// at the bottom ("Connecting WiFi...", "Reading bridge..."). UsageUI_DismissSplash
+// fades out and deletes the overlay; idempotent.
 void UsageUI_Splash();
 void UsageUI_SplashSetState(const char* line);
 void UsageUI_DismissSplash();
 bool UsageUI_SplashVisible();
 
 // ===== Captive portal panel =====
-// Mostra un pannello full-screen con "Modalità Setup", AP name, password WPA2
-// e URL. L'UI principale resta in background (i 4 panel sono nascosti).
-// ap_pass == nullptr/"" => la riga password non viene mostrata.
+// Shows a full-screen panel with "Setup Mode", AP name, WPA2 password
+// and URL. The main UI stays in the background (the 4 panels are hidden).
+// ap_pass == nullptr/"" => the password line is not shown.
 void UsageUI_ShowPortal(const char* ap_name, const char* ap_ip, const char* ap_pass = nullptr);
 void UsageUI_HidePortal();
 
-// ===== Navigazione manuale (pulsante BOOT, M4) =====
-// Passa al tab successivo (0→1→2→3→0).
+// ===== Manual navigation (BOOT button, M4) =====
+// Switches to the next tab (0→1→2→3→0).
 void UsageUI_NextTab();
 
-// Mette in pausa la rotazione automatica per `ms` millisecondi.
+// Pauses auto-rotation for `ms` milliseconds.
 void UsageUI_PauseRotate(uint32_t ms);
 
-// Abilita/disabilita persistentemente la rotazione automatica.
+// Persistently enables/disables auto-rotation.
 void UsageUI_SetAutoRotate(bool on);
 
-// Toast overlay in basso (1.5s).
+// Toast overlay at the bottom (1.5s).
 void UsageUI_Toast(const char* msg);

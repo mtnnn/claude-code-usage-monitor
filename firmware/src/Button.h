@@ -1,24 +1,24 @@
 #pragma once
 #include <Arduino.h>
 
-// Pulsante BOOT (GPIO 0) — polled, debounced.
+// BOOT button (GPIO 0) — polled, debounced.
 //
-// NB: GPIO0 è anche il strap pin di download mode dell'ESP32-S3, quindi NON
-// usiamo interrupt. Il polling è OK perché chiamiamo Button::poll() ad alta
-// frequenza dal main loop.
+// NB: GPIO0 is also the ESP32-S3 download-mode strap pin, so we do NOT
+// use interrupts. Polling is OK because we call Button::poll() at high
+// frequency from the main loop.
 namespace Button {
 
 enum Event {
   NONE,
-  TAP,         // release entro 500 ms
-  LONG,        // release tra 500 e 5000 ms
-  VERY_LONG    // ancora premuto a 5000 ms (fire mid-press per feedback)
+  TAP,         // release within 500 ms
+  LONG,        // release between 500 and 5000 ms
+  VERY_LONG    // still pressed at 5000 ms (fires mid-press for feedback)
 };
 
 void begin();
 
-// Da chiamare ad ogni iterazione del loop. Restituisce un evento al massimo
-// per chiamata (consumato e azzerato).
+// To be called on every iteration of the loop. Returns at most one event
+// per call (consumed and cleared).
 Event poll();
 
 } // namespace Button

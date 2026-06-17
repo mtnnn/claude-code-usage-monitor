@@ -1,9 +1,9 @@
 #include "UsageUI.h"
 #include "UsageUI_theme.h"
 
-// Toast overlay in basso (1.5s), auto-dismiss. Modulo autonomo.
+// Toast overlay at the bottom (1.5s), auto-dismiss. Standalone module.
 
-// One-shot: auto-delete del timer è gestito da lv_timer_set_repeat_count(tm, 1).
+// One-shot: the timer's auto-delete is handled by lv_timer_set_repeat_count(tm, 1).
 static void toast_del_cb(lv_timer_t* t) {
   lv_obj_t* obj = (lv_obj_t*)t->user_data;
   if (obj) lv_obj_del(obj);
@@ -22,7 +22,7 @@ void UsageUI_Toast(const char* msg) {
   lv_label_set_text(lbl, msg);
   lv_obj_set_style_text_color(lbl, COL_FG, LV_PART_MAIN);
   lv_obj_set_style_text_font(lbl, FONT_SMALL, LV_PART_MAIN);
-  // Auto-size: aspettiamo il layout prima di centrare
+  // Auto-size: wait for the layout before centering
   lv_obj_update_layout(t);
   lv_obj_align(t, LV_ALIGN_BOTTOM_MID, 0, -30);
 

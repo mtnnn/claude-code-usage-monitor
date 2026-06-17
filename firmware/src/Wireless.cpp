@@ -7,7 +7,7 @@ static const char* s_pass = nullptr;
 static uint8_t  s_disconnect_count = 0;
 static uint32_t s_first_disconnect_ms = 0;
 
-// Soglia: 3 disconnect in 30s SENZA un GOT_IP intermedio => persistent fail.
+// Threshold: 3 disconnects in 30s WITHOUT an intermediate GOT_IP => persistent fail.
 static const uint8_t  FAIL_THRESHOLD = 3;
 static const uint32_t FAIL_WINDOW_MS = 30000;
 
